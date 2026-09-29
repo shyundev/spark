@@ -34,6 +34,7 @@ import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GreaterTha
 import org.apache.spark.sql.catalyst.expressions.IntegralLiteralTestUtils.{negativeInt, positiveInt}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
+import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, LA, UTC}
 import org.apache.spark.sql.catalyst.util.TimestampNanosTestUtils.foreachNanosPrecision
 import org.apache.spark.sql.execution.{FileSourceScanLike, SimpleMode}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -1266,6 +1267,32 @@ class FileBasedDataSourceSuite extends SharedSparkSession
             case b: BatchScanExec => b.scan.asInstanceOf[FileScan].dataFilters
           }.flatten
           assert(filters.contains(GreaterThan(scan.logicalPlan.output.head, Literal(5L))))
+        }
+      }
+    }
+  }
+
+  test("SPARK-39993: pushed date and timestamp filters do not depend on the JVM time zone") {
+    val filters = Seq("d = DATE '2020-01-01'", "ts = TIMESTAMP '1850-01-01 00:00:00'")
+    withSQLConf(SQLConf.SESSION_LOCAL_TIMEZONE.key -> "UTC") {
+      withTempPath { path =>
+        Seq("parquet", "orc", "csv", "json").foreach { format =>
+          val dir = s"${path.getCanonicalPath}/$format"
+          sql("SELECT DATE '2020-01-01' AS d, TIMESTAMP '1850-01-01 00:00:00' AS ts")
+            .write.format(format).save(dir)
+          for (useV1SourceList <- Seq(format, ""); filter <- filters) {
+            withSQLConf(SQLConf.USE_V1_SOURCE_LIST.key -> useV1SourceList) {
+              // Plan the scan in one JVM time zone and run its tasks in another, as happens
+              // when the driver and the executors run in different time zones.
+              val rdd = withDefaultTimeZone(UTC) {
+                spark.read.schema("d DATE, ts TIMESTAMP").format(format).load(dir)
+                  .where(filter).queryExecution.executedPlan.execute()
+              }
+              withDefaultTimeZone(LA) {
+                assert(rdd.count() === 1, s"format: $format, v1: $useV1SourceList, $filter")
+              }
+            }
+          }
         }
       }
     }

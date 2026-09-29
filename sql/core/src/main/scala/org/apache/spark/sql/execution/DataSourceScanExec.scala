@@ -527,10 +527,13 @@ trait FileSourceScanLike extends DataSourceScanExec with SessionStateHelper {
     // because the metadata struct has been flatted in FileSourceStrategy
     // and thus metadata col filters are invalid to be pushed down. Metadata that is generated
     // during the scan can be used for filters.
+    // The filters are evaluated on executors, whose JVM time zone can differ from the driver's,
+    // so date and timestamp values must not depend on it.
     scalarSubqueryReplaced.filterNot(_.references.exists {
       case FileSourceConstantMetadataAttribute(_) => true
       case _ => false
-    }).flatMap(DataSourceStrategy.translateFilter(_, supportNestedPredicatePushdown))
+    }).flatMap(DataSourceStrategy.translateFilter(
+      _, supportNestedPredicatePushdown, useJava8DateTime = true))
   }
 
   // This field may execute subquery expressions and should not be accessed during planning.

@@ -30,7 +30,6 @@ import org.apache.spark.internal.LogKeys.PREDICATES
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SaveMode}
 import org.apache.spark.sql.catalyst.{expressions, CatalystTypeConverters, InternalRow, QualifiedTableName, SQLConfHelper}
-import org.apache.spark.sql.catalyst.CatalystTypeConverters.convertToScala
 import org.apache.spark.sql.catalyst.analysis._
 import org.apache.spark.sql.catalyst.analysis.NamedStreamingRelation
 import org.apache.spark.sql.catalyst.catalog._
@@ -43,7 +42,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{AppendData, InsertIntoDir, I
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.streaming.{StreamingRelationV2, StreamingSourceIdentifyingName, Unassigned}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
-import org.apache.spark.sql.catalyst.util.{GeneratedColumn, IdentityColumn, PushableExpression, ResolveDefaultColumns}
+import org.apache.spark.sql.catalyst.util.{DateTimeUtils, GeneratedColumn, IdentityColumn, PushableExpression, ResolveDefaultColumns}
 import org.apache.spark.sql.classic.{SparkSession, Strategy}
 import org.apache.spark.sql.connector.catalog.{SupportsRead, V1Table}
 import org.apache.spark.sql.connector.catalog.TableCapability._
@@ -634,9 +633,17 @@ object DataSourceStrategy
     }
   }
 
+  private def convertFilterValue(
+      useJava8DateTime: Boolean)(value: Any, dataType: DataType): Any = (value, dataType) match {
+    case (days: Int, DateType) if useJava8DateTime => DateTimeUtils.daysToLocalDate(days)
+    case (micros: Long, TimestampType) if useJava8DateTime => DateTimeUtils.microsToInstant(micros)
+    case _ => CatalystTypeConverters.convertToScala(value, dataType)
+  }
+
   private def translateLeafNodeFilter(
       predicate: Expression,
-      pushableColumn: PushableColumnBase): Option[Filter] = predicate match {
+      pushableColumn: PushableColumnBase,
+      convertToScala: (Any, DataType) => Any): Option[Filter] = predicate match {
     case expressions.EqualTo(e @ pushableColumn(name), Literal(v, t)) =>
       Some(collationAwareFilter(sources.EqualTo(name, convertToScala(v, t)), e.dataType))
     case expressions.EqualTo(Literal(v, t), e @ pushableColumn(name)) =>
@@ -668,7 +675,7 @@ object DataSourceStrategy
       Some(collationAwareFilter(sources.GreaterThanOrEqual(name, convertToScala(v, t)), e.dataType))
 
     case expressions.InSet(e @ pushableColumn(name), set) =>
-      val toScala = CatalystTypeConverters.createToScalaConverter(e.dataType)
+      val toScala = convertToScala(_: Any, e.dataType)
       Some(collationAwareFilter(sources.In(name, set.toArray.map(toScala)), e.dataType))
 
     // Because we only convert In to InSet in Optimizer when there are more than certain
@@ -676,7 +683,7 @@ object DataSourceStrategy
     // down.
     case expressions.In(e @ pushableColumn(name), list) if list.forall(_.isInstanceOf[Literal]) =>
       val hSet = list.map(_.eval(EmptyRow))
-      val toScala = CatalystTypeConverters.createToScalaConverter(e.dataType)
+      val toScala = convertToScala(_: Any, e.dataType)
       Some(collationAwareFilter(sources.In(name, hSet.toArray.map(toScala)), e.dataType))
 
     case expressions.IsNull(pushableColumn(name)) =>
@@ -710,8 +717,10 @@ object DataSourceStrategy
    * @return a `Some[Filter]` if the input [[Expression]] is convertible, otherwise a `None`.
    */
   protected[sql] def translateFilter(
-      predicate: Expression, supportNestedPredicatePushdown: Boolean): Option[Filter] = {
-    translateFilterWithMapping(predicate, None, supportNestedPredicatePushdown)
+      predicate: Expression,
+      supportNestedPredicatePushdown: Boolean,
+      useJava8DateTime: Boolean = false): Option[Filter] = {
+    translateFilterWithMapping(predicate, None, supportNestedPredicatePushdown, useJava8DateTime)
   }
 
   /**
@@ -722,12 +731,16 @@ object DataSourceStrategy
    *                               translated [[Filter]]. The map is used for rebuilding
    *                               [[Expression]] from [[Filter]].
    * @param nestedPredicatePushdownEnabled Whether nested predicate pushdown is enabled.
+   * @param useJava8DateTime Whether to translate date and timestamp values to
+   *                         `java.time.LocalDate` and `java.time.Instant` regardless of
+   *                         `spark.sql.datetime.java8API.enabled`.
    * @return a `Some[Filter]` if the input [[Expression]] is convertible, otherwise a `None`.
    */
   protected[sql] def translateFilterWithMapping(
       predicate: Expression,
       translatedFilterToExpr: Option[mutable.HashMap[sources.Filter, Expression]],
-      nestedPredicatePushdownEnabled: Boolean)
+      nestedPredicatePushdownEnabled: Boolean,
+      useJava8DateTime: Boolean = false)
     : Option[Filter] = {
     predicate match {
       case expressions.And(left, right) =>
@@ -742,25 +755,27 @@ object DataSourceStrategy
         // You can see ParquetFilters' createFilter for more details.
         for {
           leftFilter <- translateFilterWithMapping(
-            left, translatedFilterToExpr, nestedPredicatePushdownEnabled)
+            left, translatedFilterToExpr, nestedPredicatePushdownEnabled, useJava8DateTime)
           rightFilter <- translateFilterWithMapping(
-            right, translatedFilterToExpr, nestedPredicatePushdownEnabled)
+            right, translatedFilterToExpr, nestedPredicatePushdownEnabled, useJava8DateTime)
         } yield sources.And(leftFilter, rightFilter)
 
       case expressions.Or(left, right) =>
         for {
           leftFilter <- translateFilterWithMapping(
-            left, translatedFilterToExpr, nestedPredicatePushdownEnabled)
+            left, translatedFilterToExpr, nestedPredicatePushdownEnabled, useJava8DateTime)
           rightFilter <- translateFilterWithMapping(
-            right, translatedFilterToExpr, nestedPredicatePushdownEnabled)
+            right, translatedFilterToExpr, nestedPredicatePushdownEnabled, useJava8DateTime)
         } yield sources.Or(leftFilter, rightFilter)
 
       case expressions.Not(child) =>
-        translateFilterWithMapping(child, translatedFilterToExpr, nestedPredicatePushdownEnabled)
+        translateFilterWithMapping(
+          child, translatedFilterToExpr, nestedPredicatePushdownEnabled, useJava8DateTime)
           .map(sources.Not)
 
       case other =>
-        val filter = translateLeafNodeFilter(other, PushableColumn(nestedPredicatePushdownEnabled))
+        val filter = translateLeafNodeFilter(other, PushableColumn(nestedPredicatePushdownEnabled),
+          convertFilterValue(useJava8DateTime))
         if (filter.isDefined && translatedFilterToExpr.isDefined) {
           translatedFilterToExpr.get(filter.get) = predicate
         }

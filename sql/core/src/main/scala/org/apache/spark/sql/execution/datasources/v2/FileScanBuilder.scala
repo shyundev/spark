@@ -86,7 +86,9 @@ abstract class FileScanBuilder(
         dataFilters, sparkSession.sessionState.conf)
     val translatedFilters = mutable.ArrayBuffer.empty[sources.Filter]
     for (filterExpr <- expandedDataFilters) {
-      val translated = DataSourceStrategy.translateFilter(filterExpr, true)
+      // The filters are evaluated on executors, whose JVM time zone can differ from the driver's,
+      // so date and timestamp values must not depend on it.
+      val translated = DataSourceStrategy.translateFilter(filterExpr, true, useJava8DateTime = true)
       if (translated.nonEmpty) {
         translatedFilters += translated.get
       }
