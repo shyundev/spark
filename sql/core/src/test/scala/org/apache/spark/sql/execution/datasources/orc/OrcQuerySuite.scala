@@ -41,6 +41,7 @@ import org.apache.spark.sql.catalyst.util.TimestampNanosTestUtils.foreachNanosPr
 import org.apache.spark.sql.execution.FileSourceScanExec
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelation, RecordReaderIterator}
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
@@ -716,6 +717,31 @@ abstract class OrcQueryTest extends OrcTest {
         checkAnswer(df.filter("x <= 0.15"), Seq(Row(0.1), Row(-0.3)))
         checkAnswer(df.filter("x < 0.1"), Seq(Row(-0.3)))
         checkAnswer(df.filter("x == 0.2"), Seq(Row(0.2)))
+      }
+    }
+  }
+
+  test("Predicate pushdown matches both -0.0 and 0.0 for a float/double zero literal") {
+    // Spark SQL treats -0.0 and 0.0 as equal, so a zero literal must not skip a stripe whose
+    // statistics hold only the other zero.
+    Seq(FloatType, DoubleType).foreach { dataType =>
+      val nonZeros = (1 to 10).map(lit(_).cast(dataType))
+      Seq(-0.0, 0.0).foreach { stored =>
+        withTempPath { dir =>
+          val path = dir.getCanonicalPath
+          Seq.fill(10)(stored).toDF("c").select($"c".cast(dataType).as("c"))
+            .coalesce(1).write.orc(path)
+          withSQLConf(SQLConf.ORC_FILTER_PUSHDOWN_ENABLED.key -> "true") {
+            val df = spark.read.orc(path)
+            val c = $"c"
+            Seq(-0.0, 0.0).map(lit(_).cast(dataType)).foreach { zero =>
+              Seq(c === zero, c <=> zero, c <= zero, c >= zero, c.isin(zero, nonZeros.head),
+                c.isin(zero +: nonZeros: _*)).foreach { predicate =>
+                checkAnswer(df.where(predicate), df)
+              }
+            }
+          }
+        }
       }
     }
   }
