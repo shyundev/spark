@@ -501,6 +501,20 @@ class ParquetFilters(
     case l => l.asInstanceOf[JLong]
   }
 
+  // Spark SQL treats -0.0 and 0.0 as equal, but Parquet filters tell them apart: dictionaries
+  // match values by their bits, and statistics may order -0.0 before 0.0. So a zero literal is
+  // expanded to both zeros in ascending order. Equality and IN take both, `<` and `>=` take the
+  // first and `<=` and `>` take the last, which keeps both zeros on the same side of the bound.
+  private def toFloatValues(v: Any): Seq[JFloat] = v match {
+    case f: JFloat if f == 0.0f => Seq(-0.0f, 0.0f)
+    case _ => Seq(v.asInstanceOf[JFloat])
+  }
+
+  private def toDoubleValues(v: Any): Seq[JDouble] = v match {
+    case d: JDouble if d == 0.0 => Seq(-0.0, 0.0)
+    case _ => Seq(v.asInstanceOf[JDouble])
+  }
+
   private val makeEq:
     PartialFunction[ParquetSchemaType, (Array[String], Any) => FilterPredicate] = {
     case ParquetBooleanType =>
@@ -510,9 +524,11 @@ class ParquetFilters(
     case ParquetLongType =>
       (n: Array[String], v: Any) => FilterApi.eq(longColumn(n), toLongValue(v))
     case ParquetFloatType =>
-      (n: Array[String], v: Any) => FilterApi.eq(floatColumn(n), v.asInstanceOf[JFloat])
+      (n: Array[String], v: Any) => toFloatValues(v).map(FilterApi.eq(floatColumn(n), _))
+        .reduceLeft[FilterPredicate](FilterApi.or)
     case ParquetDoubleType =>
-      (n: Array[String], v: Any) => FilterApi.eq(doubleColumn(n), v.asInstanceOf[JDouble])
+      (n: Array[String], v: Any) => toDoubleValues(v).map(FilterApi.eq(doubleColumn(n), _))
+        .reduceLeft[FilterPredicate](FilterApi.or)
 
     // Binary.fromString and Binary.fromByteArray don't accept null values
     case ParquetStringType =>
@@ -611,9 +627,9 @@ class ParquetFilters(
     case ParquetLongType =>
       (n: Array[String], v: Any) => FilterApi.lt(longColumn(n), toLongValue(v))
     case ParquetFloatType =>
-      (n: Array[String], v: Any) => FilterApi.lt(floatColumn(n), v.asInstanceOf[JFloat])
+      (n: Array[String], v: Any) => FilterApi.lt(floatColumn(n), toFloatValues(v).head)
     case ParquetDoubleType =>
-      (n: Array[String], v: Any) => FilterApi.lt(doubleColumn(n), v.asInstanceOf[JDouble])
+      (n: Array[String], v: Any) => FilterApi.lt(doubleColumn(n), toDoubleValues(v).head)
 
     case ParquetStringType =>
       (n: Array[String], v: Any) =>
@@ -650,9 +666,9 @@ class ParquetFilters(
     case ParquetLongType =>
       (n: Array[String], v: Any) => FilterApi.ltEq(longColumn(n), toLongValue(v))
     case ParquetFloatType =>
-      (n: Array[String], v: Any) => FilterApi.ltEq(floatColumn(n), v.asInstanceOf[JFloat])
+      (n: Array[String], v: Any) => FilterApi.ltEq(floatColumn(n), toFloatValues(v).last)
     case ParquetDoubleType =>
-      (n: Array[String], v: Any) => FilterApi.ltEq(doubleColumn(n), v.asInstanceOf[JDouble])
+      (n: Array[String], v: Any) => FilterApi.ltEq(doubleColumn(n), toDoubleValues(v).last)
 
     case ParquetStringType =>
       (n: Array[String], v: Any) =>
@@ -689,9 +705,9 @@ class ParquetFilters(
     case ParquetLongType =>
       (n: Array[String], v: Any) => FilterApi.gt(longColumn(n), toLongValue(v))
     case ParquetFloatType =>
-      (n: Array[String], v: Any) => FilterApi.gt(floatColumn(n), v.asInstanceOf[JFloat])
+      (n: Array[String], v: Any) => FilterApi.gt(floatColumn(n), toFloatValues(v).last)
     case ParquetDoubleType =>
-      (n: Array[String], v: Any) => FilterApi.gt(doubleColumn(n), v.asInstanceOf[JDouble])
+      (n: Array[String], v: Any) => FilterApi.gt(doubleColumn(n), toDoubleValues(v).last)
 
     case ParquetStringType =>
       (n: Array[String], v: Any) =>
@@ -728,9 +744,9 @@ class ParquetFilters(
     case ParquetLongType =>
       (n: Array[String], v: Any) => FilterApi.gtEq(longColumn(n), toLongValue(v))
     case ParquetFloatType =>
-      (n: Array[String], v: Any) => FilterApi.gtEq(floatColumn(n), v.asInstanceOf[JFloat])
+      (n: Array[String], v: Any) => FilterApi.gtEq(floatColumn(n), toFloatValues(v).head)
     case ParquetDoubleType =>
-      (n: Array[String], v: Any) => FilterApi.gtEq(doubleColumn(n), v.asInstanceOf[JDouble])
+      (n: Array[String], v: Any) => FilterApi.gtEq(doubleColumn(n), toDoubleValues(v).head)
 
     case ParquetStringType =>
       (n: Array[String], v: Any) =>
@@ -783,7 +799,7 @@ class ParquetFilters(
       (n: Array[String], values: Array[Any]) =>
         val set = new HashSet[JFloat]()
         for (value <- values) {
-          set.add(value.asInstanceOf[JFloat])
+          toFloatValues(value).foreach(set.add)
         }
         FilterApi.in(floatColumn(n), set)
 
@@ -791,7 +807,7 @@ class ParquetFilters(
       (n: Array[String], values: Array[Any]) =>
         val set = new HashSet[JDouble]()
         for (value <- values) {
-          set.add(value.asInstanceOf[JDouble])
+          toDoubleValues(value).foreach(set.add)
         }
         FilterApi.in(doubleColumn(n), set)
 

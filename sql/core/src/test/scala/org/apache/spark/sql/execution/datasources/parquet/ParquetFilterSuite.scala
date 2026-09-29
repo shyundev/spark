@@ -593,6 +593,32 @@ abstract class ParquetFilterSuite extends ParquetTest with SharedSparkSession {
     }
   }
 
+  test("filter pushdown - float/double zero literals match both -0.0 and 0.0") {
+    import testImplicits._
+    // Spark SQL treats -0.0 and 0.0 as equal, so a zero literal must not skip a row group whose
+    // statistics and dictionary hold only the other zero.
+    val c = col("c")
+    Seq(FloatType, DoubleType).foreach { dataType =>
+      val nonZeros = (1 to 10).map(lit(_).cast(dataType))
+      Seq(-0.0, 0.0).foreach { stored =>
+        withTempPath { dir =>
+          val path = dir.getCanonicalPath
+          Seq.fill(10)(stored).toDF("c").select(c.cast(dataType).as("c"))
+            .coalesce(1).write.parquet(path)
+          withAllParquetReaders {
+            val df = spark.read.parquet(path)
+            Seq(-0.0, 0.0).map(lit(_).cast(dataType)).foreach { zero =>
+              Seq(c === zero, c <=> zero, c <= zero, c >= zero, c.isin(zero, nonZeros.head),
+                c.isin(zero +: nonZeros: _*)).foreach { predicate =>
+                checkAnswer(df.where(predicate), df)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   test("filter pushdown - string") {
     val data = (1 to 4).map(i => Tuple1(Option(i.toString)))
     withNestedParquetDataFrame(data) { case (inputDF, colName, resultFun) =>
