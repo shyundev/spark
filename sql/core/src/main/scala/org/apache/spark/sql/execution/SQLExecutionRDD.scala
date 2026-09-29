@@ -41,7 +41,10 @@ class SQLExecutionRDD(
     this(sqlRDD, conf, SparkPlanInfo.EMPTY)
   }
 
-  private val sqlConfigs = conf.getAllConfs
+  // The session time zone is always captured because its default value is the JVM time zone,
+  // which can be different on the executor side.
+  private val sqlConfigs =
+    conf.getAllConfs + (SQLConf.SESSION_LOCAL_TIMEZONE.key -> conf.sessionLocalTimeZone)
   private lazy val sqlConfExecutorSide = {
     val newConf = new SQLConf()
     sqlConfigs.foreach { case (k, v) => newConf.setConfString(k, v) }

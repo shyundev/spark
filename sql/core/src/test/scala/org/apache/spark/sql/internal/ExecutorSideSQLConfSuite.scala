@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.internal
 
-import java.util.UUID
+import java.util.{TimeZone, UUID}
 
 import org.scalatest.Assertions._
 
@@ -27,6 +27,7 @@ import org.apache.spark.sql.QueryTest
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
+import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.{withDefaultTimeZone, LA, UTC}
 import org.apache.spark.sql.classic.{Dataset, SparkSession}
 import org.apache.spark.sql.execution.{LeafExecNode, QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.DisableAdaptiveExecution
@@ -128,6 +129,22 @@ class ExecutorSideSQLConfSuite extends QueryTest {
     val dummyQueryExecution1 = FakeQueryExecution(spark, physicalPlan)
     // Without setting the configs assertions fail
     intercept[SparkNoSuchElementException](dummyQueryExecution1.toRdd.collect())
+  }
+
+  test("SPARK-XXXXX: executors use the default session time zone of the driver") {
+    val executorTimeZones =
+      spark.range(2).mapPartitions(_ => Iterator(TimeZone.getDefault.getID)).collect().toSet
+    // The session time zone is not set, so its value is the JVM time zone of the driver.
+    withDefaultTimeZone(if (executorTimeZones == Set("UTC")) LA else UTC) {
+      val sessionTimeZone = spark.conf.get(SQLConf.SESSION_LOCAL_TIMEZONE.key)
+      val checks = spark.range(2).mapPartitions { _ =>
+        Iterator(SQLConf.get.sessionLocalTimeZone)
+      }.collect()
+      assert(checks.toSet === Set(sessionTimeZone))
+      val physicalPlan =
+        SQLConfAssertPlan(Seq(SQLConf.SESSION_LOCAL_TIMEZONE.key -> sessionTimeZone))
+      FakeQueryExecution(spark, physicalPlan).toRdd.collect()
+    }
   }
 
   test("SPARK-30556 propagate local properties to subquery execution thread") {

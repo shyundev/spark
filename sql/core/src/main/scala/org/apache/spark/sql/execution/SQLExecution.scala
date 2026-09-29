@@ -447,8 +447,11 @@ object SQLExecution extends Logging {
   def withSQLConfPropagated[T](sparkSession: SparkSession)(body: => T): T = {
     val sc = sparkSession.sparkContext
     // Set all the specified SQL configs to local properties, so that they can be available at
-    // the executor side.
-    val allConfigs = sparkSession.sessionState.conf.getAllConfs
+    // the executor side. The session time zone is always set because its default value is the
+    // JVM time zone, which can be different on the executor side.
+    val conf = sparkSession.sessionState.conf
+    val allConfigs =
+      conf.getAllConfs + (SQLConf.SESSION_LOCAL_TIMEZONE.key -> conf.sessionLocalTimeZone)
     val originalLocalProps = allConfigs.collect {
       case (key, value) if key.startsWith("spark") =>
         val originalValue = sc.getLocalProperty(key)
