@@ -187,6 +187,15 @@ class PruneHiveTablePartitionsSuite extends PrunePartitionSuiteBase with TestHiv
     }
   }
 
+  test("SPARK-XXXXX: metastore partition pruning with mixed-case partition column names") {
+    withTable("t") {
+      sql("CREATE TABLE t(ID INT, DT STRING, HR STRING) USING PARQUET PARTITIONED BY (DT, HR)")
+      sql("INSERT INTO TABLE t SELECT 1, '20240820', '01'")
+      // Direct SQL does not take LIKE, so the metastore evaluates this filter with JDO.
+      checkAnswer(sql("SELECT ID FROM t WHERE DT = '20240820' AND HR LIKE '0%'"), Row(1) :: Nil)
+    }
+  }
+
   protected def collectPartitionFiltersFn(): PartialFunction[SparkPlan, Seq[Expression]] = {
     case scan: HiveTableScanExec => scan.partitionPruningPred
   }

@@ -200,6 +200,16 @@ class HivePartitionFilteringSuite(version: String)
       timestampStrValue)
   }
 
+  test("SPARK-XXXXX: getPartitionsByFilter: Chunk='aa' (mixed-case column name)") {
+    // Predicates carry the column names of the Spark schema, which can differ in case from
+    // the partition column names kept by the metastore.
+    val filter = attr("chunk").withName("Chunk") === "aa"
+    Seq(client, clientWithoutDirectSql).foreach { c =>
+      val partitions = c.getPartitionsByFilter(c.getRawHiveTable("default", "test"), Seq(filter))
+      assert(partitions.size == testPartitionCount / chunkValue.size)
+    }
+  }
+
   test("getPartitionsByFilter: cast(chunk as int)=1 (not a valid partition predicate)") {
     testMetastorePartitionFiltering(
       attr("chunk").cast(IntegerType) === 1,

@@ -765,7 +765,9 @@ private[client] class Shim_v2_0 extends Shim with Logging {
           None
         } else if (attr.dataType.isInstanceOf[IntegralType] || attr.dataType == StringType ||
             attr.dataType == DateType) {
-          Some(attr.name)
+          // Hive metastore stores partition column names in lower case, and its JDO filter
+          // matches `=` and `!=` on partition names such as `p=1` built from the key as written.
+          Some(attr.name.toLowerCase(Locale.ROOT))
         } else {
           None
         }
