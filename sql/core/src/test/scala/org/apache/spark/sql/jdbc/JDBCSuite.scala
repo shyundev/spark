@@ -1647,6 +1647,18 @@ class JDBCSuite extends SharedSparkSession {
     assert(dialect.compileExpression(cast).isEmpty)
   }
 
+  test("SPARK-XXXXX: MySQL compares a boolean value as non-zero in pushed predicates") {
+    val dialect = MySQLDialect()
+    def compile(f: Filter): String = dialect.compileExpression(f.toV2).get
+    assert(compile(EqualTo("flag", true)) === "`flag` <> 0")
+    assert(compile(EqualTo("flag", false)) === "`flag` = 0")
+    assert(compile(Not(EqualTo("flag", true))) === "NOT (`flag` <> 0)")
+    assert(compile(EqualNullSafe("flag", true)) === "(`flag` IS NOT NULL AND `flag` <> 0)")
+    assert(compile(GreaterThan("flag", false)) === "`flag` <> 0")
+    assert(compile(In("flag", Array(true, false))) === "(`flag` <> 0) IN (true, false)")
+    assert(compile(EqualTo("id", 1)) === "`id` = 1")
+  }
+
   test("PostgresDialect type mapping") {
     val Postgres = JdbcDialects.get("jdbc:postgresql://127.0.0.1/db")
     val md = new MetadataBuilder().putLong("scale", 0).putBoolean("isTimestampNTZ", false)

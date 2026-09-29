@@ -22,6 +22,7 @@ import java.util
 import java.util.Locale
 
 import scala.collection.mutable.ArrayBuilder
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import org.apache.spark.{SparkThrowable, SparkUnsupportedOperationException}
@@ -29,7 +30,8 @@ import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.analysis.{IndexAlreadyExistsException, NoSuchIndexException}
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.connector.catalog.index.TableIndex
-import org.apache.spark.sql.connector.expressions.{Expression, Extract, FieldReference, NamedReference, NullOrdering, SortDirection}
+import org.apache.spark.sql.connector.expressions.{Expression, Extract, FieldReference, Literal, NamedReference, NullOrdering, SortDirection}
+import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcUtils}
 import org.apache.spark.sql.types._
@@ -126,6 +128,67 @@ private case class MySQLDialect() extends JdbcDialect with SQLConfHelper with No
           // MySQL-compatible databases. In particular, MariaDB rejects it with a syntax error.
           throw new UnsupportedOperationException("Cannot cast to double type")
         case _ => super.visitCast(expr, exprDataType, dataType)
+      }
+    }
+
+    // TINYINT(1) is read as BooleanType, where any non-zero value is true, but MySQL compares a
+    // boolean value as the integer 1 or 0. Compare with 0 instead so that the pushed predicate
+    // agrees with the value Spark reads: a comparison with a boolean literal that holds only for
+    // true, such as `x = TRUE` or `x > FALSE`, becomes `x <> 0`, and one that holds only for
+    // false becomes `x = 0`. Other comparisons with a boolean value compare `(x <> 0)` with it.
+    private def isBooleanValue(e: Expression): Boolean = e match {
+      case l: Literal[_] => l.dataType == BooleanType
+      case _: Predicate => true
+      case _ => false
+    }
+
+    private def booleanLiteral(e: Expression): Option[Boolean] = e match {
+      case l: Literal[_] if l.dataType == BooleanType && l.value != null =>
+        Some(l.value.asInstanceOf[Boolean])
+      case _ => None
+    }
+
+    private def nonZero(e: Expression): String = s"(${inputToSQL(e)} <> 0)"
+
+    private def compareWithZero(
+        name: String, x: Expression, compareTo: Boolean => Int): Option[String] = {
+      def holds(b: Boolean): Boolean = name match {
+        case "=" | "<=>" => compareTo(b) == 0
+        case "<>" => compareTo(b) != 0
+        case "<" => compareTo(b) < 0
+        case "<=" => compareTo(b) <= 0
+        case ">" => compareTo(b) > 0
+        case ">=" => compareTo(b) >= 0
+      }
+      val sql = inputToSQL(x)
+      val compared = (holds(true), holds(false)) match {
+        case (true, false) => Some(s"$sql <> 0")
+        case (false, true) => Some(s"$sql = 0")
+        case _ => None
+      }
+      if (name == "<=>") compared.map(c => s"($sql IS NOT NULL AND $c)") else compared
+    }
+
+    override def build(expr: Expression): String = expr match {
+      case p: Predicate if p.name() == "IN" && p.children().tail.exists(isBooleanValue) =>
+        visitIn(nonZero(p.children().head), p.children().tail.map(build).toSeq.asJava)
+      case _ => super.build(expr)
+    }
+
+    override def visitBinaryComparison(name: String, le: Expression, re: Expression): String = {
+      val compared = (booleanLiteral(le), booleanLiteral(re)) match {
+        case (None, Some(value)) => compareWithZero(name, le, _.compare(value))
+        case (Some(value), None) => compareWithZero(name, re, value.compare(_))
+        case _ => None
+      }
+      compared.getOrElse {
+        if (isBooleanValue(re)) {
+          visitBinaryComparison(name, nonZero(le), inputToSQL(re))
+        } else if (isBooleanValue(le)) {
+          visitBinaryComparison(name, inputToSQL(le), nonZero(re))
+        } else {
+          super.visitBinaryComparison(name, le, re)
+        }
       }
     }
   }

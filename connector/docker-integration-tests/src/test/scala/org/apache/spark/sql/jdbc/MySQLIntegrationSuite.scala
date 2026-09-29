@@ -53,6 +53,9 @@ class MySQLIntegrationSuite extends SharedJDBCIntegrationSuite {
     conn.prepareStatement("CREATE TABLE bools (b1 BOOLEAN, b2 BIT(1), b3 TINYINT(1))")
       .executeUpdate()
     conn.prepareStatement("INSERT INTO bools VALUES (TRUE, b'1', 1)").executeUpdate()
+    conn.prepareStatement("CREATE TABLE tinyint1_flags (id INT, flag TINYINT(1))").executeUpdate()
+    conn.prepareStatement("INSERT INTO tinyint1_flags VALUES (1, 0), (2, 1), (3, 2), (4, -1)")
+      .executeUpdate()
 
     conn.prepareStatement("CREATE TABLE numbers (onebit BIT(1), tenbits BIT(10), "
       + "small SMALLINT, med MEDIUMINT, nor INT, big BIGINT, deci DECIMAL(40,20), flt FLOAT, "
@@ -303,6 +306,15 @@ class MySQLIntegrationSuite extends SharedJDBCIntegrationSuite {
 
     df.write.mode("append").jdbc(jdbcUrl, "bools", new Properties)
     checkAnswer(df, Seq(Row(true, true, true), Row(true, true, true)))
+  }
+
+  test("SPARK-XXXXX: push down predicates on TINYINT(1) with non-zero as true") {
+    val df = spark.read.jdbc(jdbcUrl, "tinyint1_flags", new Properties)
+    val rows = Seq(Row(1, false), Row(2, true), Row(3, true), Row(4, true))
+    checkAnswer(df, rows)
+    checkAnswer(df.where("flag"), rows.tail)
+    checkAnswer(df.where("NOT flag"), rows.head)
+    checkAnswer(df.where("flag IN (true, false)"), rows)
   }
 
   test("SPARK-47515: Save TimestampNTZType as DATETIME in MySQL") {
