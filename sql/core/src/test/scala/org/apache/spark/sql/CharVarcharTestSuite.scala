@@ -638,6 +638,33 @@ trait CharVarcharTestSuite extends QueryTest {
     }
   }
 
+  test("char type comparison: IN subquery") {
+    withTable("t1", "t2") {
+      sql(s"CREATE TABLE t1(i INT, c CHAR(2)) USING $format")
+      sql(s"CREATE TABLE t2(i INT, c CHAR(5)) USING $format")
+      sql("INSERT INTO t1 VALUES (1, 'a')")
+      sql("INSERT INTO t2 VALUES (1, 'a')")
+      Seq("true", "false").foreach { readSidePadding =>
+        withSQLConf(SQLConf.READ_SIDE_CHAR_PADDING.key -> readSidePadding) {
+          Seq(
+            "SELECT i FROM t1 WHERE c IN (SELECT c FROM t2)" -> Seq(Row(1)),
+            "SELECT i FROM t2 WHERE c IN (SELECT c FROM t1)" -> Seq(Row(1)),
+            "SELECT i FROM t1 WHERE c NOT IN (SELECT c FROM t2)" -> Nil,
+            "SELECT i FROM t1 WHERE 'a' IN (SELECT c FROM t2)" -> Seq(Row(1)),
+            "SELECT i FROM t1 WHERE (i, c) IN (SELECT i, c FROM t2)" -> Seq(Row(1)),
+            "SELECT i FROM t1 WHERE c IN (SELECT c FROM t2 WHERE t2.i = t1.i)" -> Seq(Row(1)),
+            "SELECT i FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t1.c IN (SELECT c FROM t2))" ->
+              Seq(Row(1))
+          ).foreach { case (query, expected) =>
+            withClue(s"readSideCharPadding=$readSidePadding: $query") {
+              checkAnswer(sql(query), expected)
+            }
+          }
+        }
+      }
+    }
+  }
+
   test("char type comparison: nested in struct") {
     withTable("t") {
       sql(s"CREATE TABLE t(c1 STRUCT<c: CHAR(2)>, c2 STRUCT<c: CHAR(5)>) USING $format")
