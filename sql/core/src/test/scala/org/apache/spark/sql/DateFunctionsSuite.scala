@@ -1244,6 +1244,24 @@ class DateFunctionsSuite extends SharedSparkSession {
     }
   }
 
+  test("SPARK-52457: to_date and to_timestamp with fmt on datetime inputs") {
+    withSQLConf(SQLConf.SESSION_LOCAL_TIMEZONE.key -> LA.getId) {
+      val df = sql("SELECT TIMESTAMP_NTZ'2000-09-01 01:00:00' AS ntz, " +
+        "TIMESTAMP'2000-09-01 01:00:00' AS ts, DATE'2000-09-01' AS d")
+      Seq(
+        "to_date(ntz, 'yyyy-MM-dd')" -> "to_date(ntz)",
+        "try_to_date(ntz, 'yyyy-MM-dd')" -> "try_to_date(ntz)",
+        "to_timestamp(ntz, 'yyyy-MM-dd')" -> "to_timestamp(ntz)",
+        "to_timestamp_ltz(ntz, 'yyyy-MM-dd')" -> "to_timestamp_ltz(ntz)",
+        "try_to_timestamp(ntz, 'yyyy-MM-dd')" -> "try_to_timestamp(ntz)",
+        "to_timestamp_ntz(ts, 'yyyy-MM-dd')" -> "to_timestamp_ntz(ts)",
+        "to_timestamp_ntz(d, 'yyyy-MM-dd')" -> "to_timestamp_ntz(d)"
+      ).foreach { case (withFmt, withoutFmt) =>
+        checkAnswer(df.selectExpr(withFmt), df.selectExpr(withoutFmt))
+      }
+    }
+  }
+
   test("convert_timezone") {
     val df = Seq("1990-11-22").toDF("d")
     checkAnswer(
