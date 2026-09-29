@@ -402,6 +402,15 @@ class DataFrameComplexTypeSuite extends SharedSparkSession {
     sourceDF.cache()
     checkResult()
   }
+
+  test("SPARK-XXXXX: array element access with a null index returns null under ANSI mode") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      val df = spark.range(2).selectExpr("IF(id = 0, NULL, CAST(id AS INT)) AS i")
+      checkAnswer(df.selectExpr("element_at(array(10, 20, 30), i)"), Seq(Row(null), Row(10)))
+      checkAnswer(df.selectExpr("array(10, 20, 30)[i]"), Seq(Row(null), Row(20)))
+      checkAnswer(df.where("element_at(array(10, 20, 30), i) IS NULL"), Row(null))
+    }
+  }
 }
 
 class S100(

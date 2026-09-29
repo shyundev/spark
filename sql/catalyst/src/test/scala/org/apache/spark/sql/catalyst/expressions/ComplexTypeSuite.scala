@@ -129,6 +129,16 @@ class ComplexTypeSuite extends SparkFunSuite with ExpressionEvalHelper {
     assert(GetArrayItem(stArray4, Literal(1)).nullable)
   }
 
+  test("SPARK-XXXXX: GetArrayItem with a null ordinal returns null under ANSI mode") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      val array = Literal.create(Seq(1, 2, 3), ArrayType(IntegerType, containsNull = false))
+      val ordinal = BoundReference(0, IntegerType, nullable = true)
+      assert(GetArrayItem(array, ordinal).nullable)
+      checkEvaluation(GetArrayItem(array, ordinal), null, create_row(null))
+      checkEvaluation(GetArrayItem(array, ordinal), 2, create_row(1))
+    }
+  }
+
   Seq((Int.MaxValue, "Linear Lookup"), (0, "Hash Lookup")).foreach { case (threshold, name) =>
     test(s"GetMapValue - $name") {
       withSQLConf(SQLConf.MAP_LOOKUP_HASH_THRESHOLD.key -> threshold.toString) {

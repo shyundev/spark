@@ -2523,6 +2523,16 @@ class CollectionExpressionsSuite
     }
   }
 
+  test("SPARK-XXXXX: ElementAt with a null index returns null under ANSI mode") {
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      val array = Literal.create(Seq(1, 2, 3), ArrayType(IntegerType, containsNull = false))
+      val index = BoundReference(0, IntegerType, nullable = true)
+      assert(ElementAt(array, index).nullable)
+      checkEvaluation(ElementAt(array, index), null, create_row(null))
+      checkEvaluation(ElementAt(array, index), 2, create_row(2))
+    }
+  }
+
   test("Concat") {
     // Primitive-type elements
     val ai0 = Literal.create(Seq(1, 2, 3), ArrayType(IntegerType, containsNull = false))
