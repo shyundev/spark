@@ -28,10 +28,10 @@ object CSVExprUtils {
     if (options.isCommentSet) {
       val commentPrefix = options.comment.toString
       iter.filter { line =>
-        line.trim.nonEmpty && !line.startsWith(commentPrefix)
+        (line.trim.nonEmpty || line.contains(options.delimiter)) && !line.startsWith(commentPrefix)
       }
     } else {
-      iter.filter(_.trim.nonEmpty)
+      iter.filter(line => line.trim.nonEmpty || line.contains(options.delimiter))
     }
   }
 

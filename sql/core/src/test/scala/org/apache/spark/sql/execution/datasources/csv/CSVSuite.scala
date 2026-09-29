@@ -2052,6 +2052,20 @@ abstract class CSVSuite
     checkAnswer(ds, Seq(Row(""" "a" """)))
   }
 
+  test("SPARK-46876: do not skip lines that consist of whitespace delimiters") {
+    val df = Seq(("1", "2"), (null, null), ("3", "4")).toDF("a", "b")
+    Seq("\t", " ", "\u0001").foreach { sep =>
+      withTempPath { path =>
+        df.write.option("sep", sep).csv(path.getCanonicalPath)
+        Seq("", "#").foreach { comment =>
+          val reader = spark.read.schema(df.schema).option("sep", sep).option("comment", comment)
+          checkAnswer(reader.csv(path.getCanonicalPath), df)
+          checkAnswer(reader.csv(spark.read.textFile(path.getCanonicalPath)), df)
+        }
+      }
+    }
+  }
+
   test("SPARK-24244: Select a subset of all columns") {
     withTempPath { path =>
       import scala.jdk.CollectionConverters._
