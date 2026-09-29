@@ -21,6 +21,7 @@ import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, HiveTableRelation}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
+import org.apache.spark.sql.connector.catalog.{InMemoryRelationCatalog, InMemoryTableCatalog}
 import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
 import org.apache.spark.sql.execution.SQLViewSuite
 import org.apache.spark.sql.hive.{HiveExternalCatalog, HiveUtils}
@@ -232,6 +233,32 @@ class HiveSQLViewSuite extends SQLViewSuite with TestHiveSingleton {
           )
         )
       }
+    }
+  }
+
+  test("CREATE VIEW in a v2 catalog checks temporary references and view support") {
+    withSQLConf(
+      "spark.sql.catalog.view_cat" -> classOf[InMemoryRelationCatalog].getName,
+      "spark.sql.catalog.no_view_cat" -> classOf[InMemoryTableCatalog].getName) {
+      withTempView("tv") {
+        sql("CREATE TEMPORARY VIEW tv AS SELECT 1 AS c")
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql("CREATE VIEW view_cat.ns.v AS SELECT * FROM tv")
+          },
+          condition = "INVALID_TEMP_OBJ_REFERENCE",
+          parameters = Map(
+            "obj" -> "VIEW",
+            "objName" -> "`view_cat`.`ns`.`v`",
+            "tempObj" -> "VIEW",
+            "tempObjName" -> "`tv`"))
+      }
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("CREATE VIEW no_view_cat.ns.v AS SELECT 1 AS c")
+        },
+        condition = "MISSING_CATALOG_ABILITY.VIEWS",
+        parameters = Map("plugin" -> "no_view_cat"))
     }
   }
 
