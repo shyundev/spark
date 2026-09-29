@@ -809,6 +809,35 @@ def _check_series_convert_timestamps_internal(
         return s.dt.tz_localize(tz, ambiguous=False).dt.tz_convert("UTC")
     elif isinstance(s.dtype, pd.DatetimeTZDtype):
         return s.dt.tz_convert("UTC")
+    elif s.dtype == object:
+        import numpy as np
+
+        values = s.to_numpy()
+        naive = np.fromiter(
+            (isinstance(v, datetime.datetime) and v.tzinfo is None for v in values),
+            dtype=bool,
+            count=len(values),
+        )
+        if not naive.any():
+            return s
+
+        def to_datetime64(ser: pd.Series) -> pd.Series:
+            try:
+                return pd.to_datetime(ser)
+            except pd.errors.OutOfBoundsDatetime:
+                # pandas 2 converts to nanoseconds, which cannot hold dates like 9999-12-31.
+                return ser.astype("datetime64[us]")
+
+        if (naive | s.isna().to_numpy()).all():
+            return _check_series_convert_timestamps_internal(to_datetime64(s), timezone)
+
+        # Other values, such as timezone-aware datetimes, are kept as they are.
+        localized = _check_series_convert_timestamps_internal(
+            to_datetime64(pd.Series(values[naive])), timezone
+        )
+        values = values.copy()
+        values[naive] = localized.astype(object).to_numpy()
+        return pd.Series(values, index=s.index, name=s.name, dtype=object)
     else:
         return s
 

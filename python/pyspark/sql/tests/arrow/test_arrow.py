@@ -1579,6 +1579,36 @@ class ArrowTestsMixin:
 
         self.assertEqual(df.first(), expected)
 
+    def test_createDataFrame_pandas_object_timestamp(self):
+        # Naive datetimes in an object column are in the session timezone, like datetime64.
+        naive = datetime.datetime(2023, 1, 1, 0, 0, 0)
+        aware = datetime.datetime(2023, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        pdf = pd.DataFrame(
+            {
+                # 9999-12-31 does not fit in datetime64[ns], so pandas 2 keeps the column object.
+                "ts": pd.Series([naive, datetime.datetime(9999, 12, 31), None], dtype=object),
+                "mixed": pd.Series([naive, aware, None], dtype=object),
+            }
+        )
+
+        with self.sql_conf({"spark.sql.session.timeZone": "America/New_York"}):
+            df = self.spark.createDataFrame(pdf, "ts timestamp, mixed timestamp")
+
+        self.assertEqual(
+            df.collect(),
+            [
+                Row(
+                    ts=datetime.datetime(2022, 12, 31, 21, 0, 0),
+                    mixed=datetime.datetime(2022, 12, 31, 21, 0, 0),
+                ),
+                Row(
+                    ts=datetime.datetime(9999, 12, 30, 21, 0, 0),
+                    mixed=datetime.datetime(2022, 12, 31, 16, 0, 0),
+                ),
+                Row(ts=None, mixed=None),
+            ],
+        )
+
     def test_toPandas_timestmap_tzinfo(self):
         for arrow_enabled in [True, False]:
             with self.subTest(arrow_enabled=arrow_enabled):
