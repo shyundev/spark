@@ -383,6 +383,12 @@ class ArrowTestsMixin:
             pdf = df.toPandas()
         assert_frame_equal(origin, pdf)
 
+    def test_toPandas_day_time_interval_overflow(self):
+        # 106752 days does not fit in int64 nanoseconds.
+        df = self.spark.sql("SELECT INTERVAL '106752' DAY AS a")
+        with self.assertRaisesRegex(pa.ArrowInvalid, "out of bounds"):
+            df.toPandas()
+
     def test_create_data_frame_to_arrow_day_time_internal(self):
         origin = pa.table({"a": [datetime.timedelta(microseconds=123)]})
         df = self.spark.createDataFrame(origin)

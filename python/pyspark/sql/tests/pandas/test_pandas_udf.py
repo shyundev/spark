@@ -435,6 +435,18 @@ class PandasUDFTestsMixin:
         self.assertEqual(df.schema[0].dataType.simpleString(), "interval day to second")
         self.assertEqual(df.first()[0], datetime.timedelta(microseconds=123))
 
+    def test_pandas_udf_day_time_interval_overflow(self):
+        import pandas as pd
+
+        @pandas_udf("long")
+        def days(s: pd.Series) -> pd.Series:
+            return s.dt.days
+
+        # 106752 days does not fit in int64 nanoseconds.
+        df = self.spark.sql("SELECT INTERVAL '106752' DAY AS td")
+        with self.assertRaisesRegex(PythonException, "out of bounds"):
+            df.select(days("td")).collect()
+
     def test_pandas_udf_return_type_error(self):
         import pandas as pd
 

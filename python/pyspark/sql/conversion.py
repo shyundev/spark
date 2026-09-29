@@ -2027,6 +2027,9 @@ class ArrowToPandasConversion:
             "coerce_temporal_nanoseconds": True,
             "integer_object_nulls": True,
         }
+        if pa.types.is_duration(arr.type):
+            # coerce_temporal_nanoseconds does not check durations for overflow.
+            arr = arr.cast(pa.duration("ns"))
         ser = arr.to_pandas(**pandas_options)
 
         converter = _create_converter_to_pandas(

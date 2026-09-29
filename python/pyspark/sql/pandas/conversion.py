@@ -241,6 +241,7 @@ def _convert_arrow_table_to_pandas(
         The converted pandas DataFrame
     """
     import pandas as pd
+    import pyarrow as pa
 
     from pyspark.sql.pandas.types import _create_converter_to_pandas
 
@@ -282,8 +283,14 @@ def _convert_arrow_table_to_pandas(
         error_on_duplicated_field_names = True
         struct_handling_mode = "dict"
 
-    # Convert arrow columns to pandas Series
-    column_data = (arrow_col.to_pandas(**pandas_options) for arrow_col in arrow_table.columns)
+    # Convert arrow columns to pandas Series. Durations are cast to nanoseconds first since
+    # coerce_temporal_nanoseconds does not check them for overflow.
+    column_data = (
+        arrow_col.cast(pa.duration("ns")).to_pandas(**pandas_options)
+        if pa.types.is_duration(arrow_col.type)
+        else arrow_col.to_pandas(**pandas_options)
+        for arrow_col in arrow_table.columns
+    )
 
     # Apply Spark-specific type converters to each column
     pdf = pd.concat(
