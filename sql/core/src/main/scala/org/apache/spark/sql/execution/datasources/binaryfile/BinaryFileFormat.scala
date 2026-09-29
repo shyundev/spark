@@ -19,6 +19,7 @@ package org.apache.spark.sql.execution.datasources.binaryfile
 
 import java.io.InputStream
 import java.sql.Timestamp
+import java.time.Instant
 
 import com.google.common.io.Closeables
 import org.apache.hadoop.conf.Configuration
@@ -225,16 +226,24 @@ object BinaryFileFormat {
       case GreaterThan(LENGTH, value: Long) => Some(_.getLen > value)
       case GreaterThanOrEqual(LENGTH, value: Long) => Some(_.getLen >= value)
       case EqualTo(LENGTH, value: Long) => Some(_.getLen == value)
-      case LessThan(MODIFICATION_TIME, value: Timestamp) =>
-        Some(_.getModificationTime < value.getTime)
-      case LessThanOrEqual(MODIFICATION_TIME, value: Timestamp) =>
-        Some(_.getModificationTime <= value.getTime)
-      case GreaterThan(MODIFICATION_TIME, value: Timestamp) =>
-        Some(_.getModificationTime > value.getTime)
-      case GreaterThanOrEqual(MODIFICATION_TIME, value: Timestamp) =>
-        Some(_.getModificationTime >= value.getTime)
-      case EqualTo(MODIFICATION_TIME, value: Timestamp) =>
-        Some(_.getModificationTime == value.getTime)
+      case LessThan(MODIFICATION_TIME, EpochMillis(value)) =>
+        Some(_.getModificationTime < value)
+      case LessThanOrEqual(MODIFICATION_TIME, EpochMillis(value)) =>
+        Some(_.getModificationTime <= value)
+      case GreaterThan(MODIFICATION_TIME, EpochMillis(value)) =>
+        Some(_.getModificationTime > value)
+      case GreaterThanOrEqual(MODIFICATION_TIME, EpochMillis(value)) =>
+        Some(_.getModificationTime >= value)
+      case EqualTo(MODIFICATION_TIME, EpochMillis(value)) =>
+        Some(_.getModificationTime == value)
+      case _ => None
+    }
+  }
+
+  private object EpochMillis {
+    def unapply(value: Any): Option[Long] = value match {
+      case t: Timestamp => Some(t.getTime)
+      case i: Instant => Some(i.toEpochMilli)
       case _ => None
     }
   }

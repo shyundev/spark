@@ -32,7 +32,7 @@ import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.functions.col
-import org.apache.spark.sql.internal.SQLConf.SOURCES_BINARY_FILE_MAX_LENGTH
+import org.apache.spark.sql.internal.SQLConf.{DATETIME_JAVA8API_ENABLED, SOURCES_BINARY_FILE_MAX_LENGTH}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
@@ -383,6 +383,23 @@ class BinaryFileFormatSuite extends SharedSparkSession {
         case Row(p: String, c: Array[Byte]) =>
           assert(p.endsWith(file.getAbsolutePath), "should support space in file name")
           assert(c === content, "should read file with space in file name")
+      }
+    }
+  }
+
+  test("SPARK-39993: modificationTime filters skip files whether java8API is enabled or not") {
+    withTempPath { file =>
+      Files.write(file.toPath, "abc".getBytes, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+      Seq("true", "false").foreach { java8Api =>
+        // The file is longer than the max length, so the query fails if the file is read.
+        withSQLConf(
+            DATETIME_JAVA8API_ENABLED.key -> java8Api,
+            SOURCES_BINARY_FILE_MAX_LENGTH.key -> "1") {
+          val df = spark.read.format(BINARY_FILE).load(file.getPath)
+            .where(s"$MODIFICATION_TIME < TIMESTAMP '2000-01-01 00:00:00'")
+            .select(CONTENT)
+          assert(df.collect().isEmpty)
+        }
       }
     }
   }
