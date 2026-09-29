@@ -3135,7 +3135,8 @@ case class ParseToDate(
   extends RuntimeReplaceable with ImplicitCastInputTypes with TimeZoneAwareExpression {
 
   override lazy val replacement: Expression = withOrigin(origin) {
-    format.map { f =>
+    // Datetime inputs ignore the format and follow the casting rules.
+    format.filterNot(_ => left.dataType.isInstanceOf[DatetimeType]).map { f =>
       Cast(GetTimestamp(left, f, TimestampType, "try_to_date", timeZoneId, ansiEnabled), DateType,
         timeZoneId, EvalMode.fromBoolean(ansiEnabled))
     }.getOrElse(Cast(left, DateType, timeZoneId,
@@ -3259,7 +3260,8 @@ case class ParseToTimestamp(
   extends RuntimeReplaceable with ImplicitCastInputTypes with TimeZoneAwareExpression {
 
   override lazy val replacement: Expression = withOrigin(origin) {
-    format.map { f =>
+    // Datetime inputs ignore the format and follow the casting rules.
+    format.filterNot(_ => left.dataType.isInstanceOf[DatetimeType]).map { f =>
       GetTimestamp(left, f, dataType, "try_to_timestamp", timeZoneId, failOnError = failOnError)
     }.getOrElse(Cast(left, dataType, timeZoneId, ansiEnabled = failOnError))
   }
