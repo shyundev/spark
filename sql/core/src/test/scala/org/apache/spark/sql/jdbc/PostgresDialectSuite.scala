@@ -26,6 +26,7 @@ import org.mockito.Mockito._
 import org.scalatestplus.mockito.MockitoSugar
 
 import org.apache.spark.SparkFunSuite
+import org.apache.spark.sql.connector.expressions.{Extract, FieldReference}
 import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions
 import org.apache.spark.sql.types.MetadataBuilder
 
@@ -90,6 +91,11 @@ class PostgresDialectSuite extends SparkFunSuite with MockitoSugar {
     assert(!dialect.isSyntaxErrorBestEffort(new SQLException("undefined column", "42703")))
     assert(!dialect.isSyntaxErrorBestEffort(new SQLException("undefined function", "42883")))
     assert(!dialect.isSyntaxErrorBestEffort(new SQLException("error without SQLSTATE")))
+  }
+
+  test("SPARK-XXXXX: push down SECOND without the fraction of a second") {
+    val second = new Extract("SECOND", FieldReference("ts"))
+    assert(dialect.compileExpression(second).get === """FLOOR(EXTRACT(SECOND FROM "ts"))""")
   }
 
   test("updateExtraColumnMeta escapes a single quote in the table and column name") {

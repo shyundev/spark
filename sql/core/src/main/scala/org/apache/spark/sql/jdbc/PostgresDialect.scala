@@ -332,8 +332,10 @@ private case class PostgresDialect()
 
   class PostgresSQLBuilder extends JDBCSQLBuilder {
     override def visitExtract(field: String, source: String): String = {
-      // SECOND, MINUTE, HOUR, DAY, MONTH, QUARTER, YEAR are identical on postgres and spark for
+      // MINUTE, HOUR, DAY, MONTH, QUARTER, YEAR are identical on postgres and spark for
       // both datetime and interval types.
+      // SECOND       includes the fraction of a second on postgres, but comes from spark's
+      //              second(), which returns whole seconds, so we push down FLOOR of it
       // DAY_OF_WEEK  is DOW, day of week is full compatible with postgres,
       //              but in V2ExpressionBuilder they converted DAY_OF_WEEK to DAY_OF_WEEK_ISO,
       //              so we need to push down ISODOW
@@ -349,7 +351,8 @@ private case class PostgresDialect()
         case "YEAR_OF_WEEK" => "ISOYEAR"
         case _ => field
       }
-      super.visitExtract(postgresField, source)
+      val extract = super.visitExtract(postgresField, source)
+      if (field == "SECOND") s"FLOOR($extract)" else extract
     }
 
     override def visitBinaryArithmetic(name: String, l: String, r: String): String = {

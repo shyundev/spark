@@ -20,7 +20,7 @@ package org.apache.spark.sql.jdbc.v2
 import java.sql.Connection
 
 import org.apache.spark.{SparkConf, SparkSQLException}
-import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException
 import org.apache.spark.sql.execution.datasources.v2.jdbc.JDBCTableCatalog
 import org.apache.spark.sql.jdbc.PostgresDatabaseOnDocker
@@ -204,6 +204,10 @@ class PostgresIntegrationSuite extends DockerJDBCIntegrationV2Suite with V2JDBCT
     // '2022-01-01' is Saturday and is in ISO year 2021.
     connection.prepareStatement("INSERT INTO datetime VALUES " +
       "('tom', '2022-01-01', '2022-01-01 00:00:00')").executeUpdate()
+    connection.prepareStatement("CREATE TABLE fractional_seconds (id INTEGER, ts TIMESTAMP)")
+      .executeUpdate()
+    connection.prepareStatement("INSERT INTO fractional_seconds VALUES " +
+      "(1, '2022-05-19 00:00:30.5'), (2, '2022-05-19 00:00:30')").executeUpdate()
   }
 
   override def testUpdateColumnType(tbl: String): Unit = {
@@ -272,6 +276,16 @@ class PostgresIntegrationSuite extends DockerJDBCIntegrationV2Suite with V2JDBCT
     assert(rows.length == 1)
     assert(rows(0).getInt(0) === 6)
     assert(rows(0).getString(1) === "jen")
+  }
+
+  test("SPARK-XXXXX: push down second() without the fraction of a second") {
+    val df1 = sql(s"SELECT id FROM $catalogName.fractional_seconds WHERE second(ts) = 30")
+    checkFilterPushed(df1)
+    checkAnswer(df1, Seq(Row(1), Row(2)))
+
+    val df2 = sql(s"SELECT second(ts), count(*) FROM $catalogName.fractional_seconds GROUP BY 1")
+    checkAggregateRemoved(df2)
+    checkAnswer(df2, Row(30, 2))
   }
 
   override def testDatetime(tbl: String): Unit = {
