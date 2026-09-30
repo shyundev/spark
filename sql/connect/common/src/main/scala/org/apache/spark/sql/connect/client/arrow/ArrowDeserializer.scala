@@ -34,7 +34,7 @@ import org.apache.arrow.vector.complex.{ListVector, MapVector, StructVector}
 import org.apache.arrow.vector.ipc.ArrowReader
 
 import org.apache.spark.SparkRuntimeException
-import org.apache.spark.sql.catalyst.ScalaReflection
+import org.apache.spark.sql.catalyst.{ScalaReflection, WalkedTypePath}
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoder
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders._
 import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
@@ -86,22 +86,26 @@ object ArrowDeserializers {
       // by convention we bind to the first one.
       root.getVector(0)
     }
-    deserializerFor(encoder, data, timeZoneId).asInstanceOf[Deserializer[T]]
+    val path = WalkedTypePath().recordRoot(encoder.clsTag.runtimeClass.getName)
+    nullSafe(deserializerFor(encoder, data, timeZoneId, path), encoder.nullable, path)
+      .asInstanceOf[Deserializer[T]]
   }
 
   private[arrow] def deserializerFor(
       encoder: AgnosticEncoder[_],
       data: AnyRef,
-      timeZoneId: String): Deserializer[Any] =
+      timeZoneId: String,
+      path: WalkedTypePath = WalkedTypePath()): Deserializer[Any] =
     ConnectTypeOps
       .forEncoder(encoder)
       .map(_.createArrowDeserializer(encoder, data, timeZoneId))
-      .getOrElse(deserializerForDefault(encoder, data, timeZoneId))
+      .getOrElse(deserializerForDefault(encoder, data, timeZoneId, path))
 
   private def deserializerForDefault(
       encoder: AgnosticEncoder[_],
       data: AnyRef,
-      timeZoneId: String): Deserializer[Any] = {
+      timeZoneId: String,
+      path: WalkedTypePath): Deserializer[Any] = {
     (encoder, data) match {
       case (PrimitiveBooleanEncoder | BoxedBooleanEncoder, v: FieldVector) =>
         new LeafFieldDeserializer[Boolean](encoder, v, timeZoneId) {
@@ -218,19 +222,20 @@ object ArrowDeserializers {
           override def value(i: Int): LocalDateTime = reader.getLocalDateTime(i)
         }
       case (OptionEncoder(value), v) =>
-        val deserializer = deserializerFor(value, v, timeZoneId)
+        val valuePath = path.recordOption(value.clsTag.runtimeClass.getName)
+        val deserializer = deserializerFor(value, v, timeZoneId, valuePath)
         new Deserializer[Any] {
           override def get(i: Int): Any = Option(deserializer.get(i))
         }
 
-      case (ArrayEncoder(element, _), v: ListVector) =>
-        val deserializer = deserializerFor(element, v.getDataVector, timeZoneId)
+      case (ArrayEncoder(element, containsNull), v: ListVector) =>
+        val deserializer = elementDeserializerFor(element, containsNull, v, timeZoneId, path)
         new VectorFieldDeserializer[AnyRef, ListVector](v) {
           def value(i: Int): AnyRef = getArray(vector, i, deserializer)(element.clsTag)
         }
 
-      case (IterableEncoder(tag, element, _, _), v: ListVector) =>
-        val deserializer = deserializerFor(element, v.getDataVector, timeZoneId)
+      case (IterableEncoder(tag, element, containsNull, _), v: ListVector) =>
+        val deserializer = elementDeserializerFor(element, containsNull, v, timeZoneId, path)
         if (isSubClass(Classes.MUTABLE_ARRAY_SEQ, tag)) {
           // mutable ArraySeq is a bit special because we need to use an array of the element type.
           // Some parts of our codebase (unfortunately) rely on this for type inference on results.
@@ -276,10 +281,12 @@ object ArrowDeserializers {
 
       case (MapEncoder(tag, key, value, _), v: MapVector) =>
         val structVector = v.getDataVector.asInstanceOf[StructVector]
+        val mapPath =
+          path.recordMap(key.clsTag.runtimeClass.getName, value.clsTag.runtimeClass.getName)
         val keyDeserializer =
-          deserializerFor(key, structVector.getChild(MapVector.KEY_NAME), timeZoneId)
+          deserializerFor(key, structVector.getChild(MapVector.KEY_NAME), timeZoneId, mapPath)
         val valueDeserializer =
-          deserializerFor(value, structVector.getChild(MapVector.VALUE_NAME), timeZoneId)
+          deserializerFor(value, structVector.getChild(MapVector.VALUE_NAME), timeZoneId, mapPath)
         if (isSubClass(Classes.MAP, tag)) {
           val companion = ScalaCollectionUtils.getMapCompanion(tag)
           new VectorFieldDeserializer[Map[Any, Any], MapVector](v) {
@@ -322,7 +329,7 @@ object ArrowDeserializers {
             outer.map(_.getClass) ++ fields.map(_.enc.clsTag.runtimeClass))
         val deserializers = if (isTuple(tag.runtimeClass)) {
           fields.zip(vectors).map { case (field, vector) =>
-            deserializerFor(field.enc, vector, timeZoneId)
+            fieldDeserializerFor(field, field.enc.nullable, vector, timeZoneId, path)
           }
         } else {
           val outerDeserializer = outer.map { value =>
@@ -332,7 +339,7 @@ object ArrowDeserializers {
           }
           val lookup = createFieldLookup(vectors)
           outerDeserializer ++ fields.map { field =>
-            deserializerFor(field.enc, lookup(field.name), timeZoneId)
+            fieldDeserializerFor(field, field.enc.nullable, lookup(field.name), timeZoneId, path)
           }
         }
         new StructFieldSerializer[Any](struct) {
@@ -410,7 +417,8 @@ object ArrowDeserializers {
           .filter(_.writeMethod.isDefined)
           .map { field =>
             val vector = lookup(field.name)
-            val deserializer = deserializerFor(field.enc, vector, timeZoneId)
+            val deserializer =
+              fieldDeserializerFor(field, field.nullable, vector, timeZoneId, path)
             val setter = methodLookup.findVirtual(
               tag.runtimeClass,
               field.writeMethod.get,
@@ -428,7 +436,7 @@ object ArrowDeserializers {
       case (TransformingEncoder(_, encoder, provider, _), v) =>
         new Deserializer[Any] {
           private[this] val codec = provider()
-          private[this] val deserializer = deserializerFor(encoder, v, timeZoneId)
+          private[this] val deserializer = deserializerFor(encoder, v, timeZoneId, path)
           override def get(i: Int): Any = codec.decode(deserializer.get(i))
         }
 
@@ -442,6 +450,50 @@ object ArrowDeserializers {
   }
 
   private val methodLookup = MethodHandles.lookup()
+
+  private def elementDeserializerFor(
+      element: AgnosticEncoder[_],
+      containsNull: Boolean,
+      vector: ListVector,
+      timeZoneId: String,
+      path: WalkedTypePath): Deserializer[Any] = {
+    val elementPath = path.recordArray(element.clsTag.runtimeClass.getName)
+    val deserializer = deserializerFor(element, vector.getDataVector, timeZoneId, elementPath)
+    nullSafe(deserializer, containsNull, elementPath)
+  }
+
+  private def fieldDeserializerFor(
+      field: EncoderField,
+      nullable: Boolean,
+      vector: FieldVector,
+      timeZoneId: String,
+      path: WalkedTypePath): Deserializer[Any] = {
+    val fieldPath = path.recordField(field.enc.clsTag.runtimeClass.getName, field.name)
+    nullSafe(deserializerFor(field.enc, vector, timeZoneId, fieldPath), nullable, fieldPath)
+  }
+
+  /**
+   * Wrap `deserializer` so that it fails when a non-nullable value, such as a primitive, is null.
+   */
+  private def nullSafe(
+      deserializer: Deserializer[Any],
+      nullable: Boolean,
+      path: WalkedTypePath): Deserializer[Any] = {
+    if (nullable) {
+      deserializer
+    } else {
+      val walkedTypePath = path.getPaths.mkString("\n", "\n", "\n")
+      new Deserializer[Any] {
+        override def get(i: Int): Any = {
+          val value = deserializer.get(i)
+          if (value == null) {
+            throw ExecutionErrors.notNullAssertViolation(walkedTypePath)
+          }
+          value
+        }
+      }
+    }
+  }
 
   /**
    * Resolve the companion object for a scala class. In our particular case the class we pass in

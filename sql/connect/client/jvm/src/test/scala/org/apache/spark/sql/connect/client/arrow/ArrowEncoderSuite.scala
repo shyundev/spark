@@ -812,11 +812,50 @@ class ArrowEncoderSuite extends ConnectFunSuite {
     }
   }
 
+  test("SPARK-XXXXX: null value for a non-nullable encoder") {
+    def assertNotNullViolation[I, O](
+        input: AgnosticEncoder[I],
+        output: AgnosticEncoder[O],
+        value: I,
+        walkedTypePath: String*): Unit = {
+      val result = roundTripWithDifferentIOEncoders(input, output, Iterator.single(value))
+      try {
+        val e = intercept[SparkRuntimeException](result.next())
+        assert(e.getCondition == "NOT_NULL_ASSERT_VIOLATION")
+        assert(
+          e.getMessageParameters.get("walkedTypePath") ==
+            walkedTypePath.mkString("\n", "\n", "\n"))
+      } finally {
+        result.close()
+      }
+    }
+    assertNotNullViolation(BoxedLongEncoder, PrimitiveLongEncoder, null, "- root class: \"long\"")
+    assertNotNullViolation(
+      ScalaReflection.encoderFor[Array[java.lang.Integer]],
+      ScalaReflection.encoderFor[Array[Int]],
+      Array[java.lang.Integer](1, null),
+      "- array element class: \"int\"",
+      "- root class: \"[I\"")
+    assertNotNullViolation(
+      ScalaReflection.encoderFor[(Int, java.lang.Integer)],
+      ScalaReflection.encoderFor[(Int, Int)],
+      (1, null),
+      "- field (class: \"int\", name: \"_2\")",
+      "- root class: \"scala.Tuple2\"")
+
+    val options = roundTripWithDifferentIOEncoders(
+      BoxedIntEncoder,
+      ScalaReflection.encoderFor[Option[Int]],
+      Iterator[java.lang.Integer](1, null))
+    try {
+      assert(options.toSeq == Seq(Some(1), None))
+    } finally {
+      options.close()
+    }
+  }
+
   // TODO follow-up with more null tests here:
-  // - Null primitive
   // - Non-nullable map value
-  // - Non-nullable structfield
-  // - Non-nullable array element.
 
   test("lenient field serialization - date/localdate") {
     val base = java.time.LocalDate.now()

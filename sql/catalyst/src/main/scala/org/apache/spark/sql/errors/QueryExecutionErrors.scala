@@ -3292,15 +3292,6 @@ private[sql] object QueryExecutionErrors extends QueryErrorsBase with ExecutionE
     )
   }
 
-  def notNullAssertViolation(walkedTypePath: String): SparkRuntimeException = {
-    new SparkRuntimeException(
-      errorClass = "NOT_NULL_ASSERT_VIOLATION",
-      messageParameters = Map(
-        "walkedTypePath" -> walkedTypePath
-      )
-    )
-  }
-
   def invalidDatetimeUnitError(
       functionName: String,
       invalidValue: String): Throwable = {

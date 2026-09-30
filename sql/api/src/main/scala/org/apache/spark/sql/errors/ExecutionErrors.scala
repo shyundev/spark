@@ -247,6 +247,12 @@ private[sql] trait ExecutionErrors extends DataTypeErrorsBase {
     new SparkUnsupportedOperationException("TUPLE_IS_EMPTY")
   }
 
+  def notNullAssertViolation(walkedTypePath: String): SparkRuntimeException = {
+    new SparkRuntimeException(
+      errorClass = "NOT_NULL_ASSERT_VIOLATION",
+      messageParameters = Map("walkedTypePath" -> walkedTypePath))
+  }
+
   def invalidAgnosticEncoderError(encoder: AnyRef): Throwable = {
     new SparkRuntimeException(
       errorClass = "INVALID_AGNOSTIC_ENCODER",
