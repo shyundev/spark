@@ -568,7 +568,7 @@ final class Decimal extends Ordered[Decimal] with Serializable {
 
   def unary_- : Decimal = {
     if (decimalVal.ne(null)) {
-      Decimal(-decimalVal, precision, scale)
+      Decimal(decimalVal.underlying().negate(), precision, scale)
     } else {
       Decimal(-longVal, precision, scale)
     }
