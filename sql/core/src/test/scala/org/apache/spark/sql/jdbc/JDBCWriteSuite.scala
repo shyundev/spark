@@ -20,17 +20,20 @@ package org.apache.spark.sql.jdbc
 import java.sql.{Date, DriverManager, Timestamp}
 import java.time.{Instant, LocalDate}
 import java.util.Properties
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
 import org.scalatest.BeforeAndAfter
 
-import org.apache.spark.SparkException
+import org.apache.spark.{SparkException, TaskContext}
+import org.apache.spark.internal.config
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.{AnalysisException, DataFrame, Row, SaveMode}
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.execution.datasources.jdbc.{JDBCOptions, JdbcUtils}
+import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
@@ -740,4 +743,37 @@ class JDBCWriteSuite extends SharedSparkSession with BeforeAndAfter {
       }
     }
   }
+
+  test("SPARK-38058: a retried write stage commits each partition once") {
+    // The injected fetch failure makes the write stage run again after partition 0 finishes.
+    // Partition 1 of the first stage attempt waits until the retried stage attempt has started
+    // the same partition, so both attempts reach the commit.
+    JDBCWriteSuite.retryStarted = new CountDownLatch(1)
+    val waitForRetry = udf { (id: Int) =>
+      val ctx = TaskContext.get()
+      if (ctx.partitionId() == 1) {
+        if (ctx.stageAttemptNumber() == 0) {
+          JDBCWriteSuite.retryStarted.await(30, TimeUnit.SECONDS)
+        } else {
+          JDBCWriteSuite.retryStarted.countDown()
+        }
+      }
+      id
+    }.asNondeterministic()
+    withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+      withSparkContextConf(
+          config.Tests.INJECT_SHUFFLE_FETCH_FAILURES.key -> "true",
+          config.Tests.INJECT_SHUFFLE_FETCH_FAILURES_RESULT_STAGE_DELAY.key -> "1") {
+        spark.range(0, 100, 1, 2).selectExpr("CAST(id AS INT) AS id")
+          .repartition(4)
+          .select(waitForRetry(col("id")).as("id"))
+          .write.jdbc(url, "TEST.RETRIEDWRITE", new Properties())
+      }
+    }
+    assert(spark.read.jdbc(url, "TEST.RETRIEDWRITE", new Properties()).count() === 100)
+  }
+}
+
+object JDBCWriteSuite {
+  @volatile var retryStarted: CountDownLatch = new CountDownLatch(0)
 }

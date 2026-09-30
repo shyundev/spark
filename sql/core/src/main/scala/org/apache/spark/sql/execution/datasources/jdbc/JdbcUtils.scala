@@ -27,8 +27,8 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
-import org.apache.spark.{SparkContext, SparkThrowable, SparkUnsupportedOperationException, TaskContext}
-import org.apache.spark.executor.InputMetrics
+import org.apache.spark.{SparkContext, SparkEnv, SparkThrowable, SparkUnsupportedOperationException, TaskContext}
+import org.apache.spark.executor.{CommitDeniedException, InputMetrics}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.LogKeys.{DEFAULT_ISOLATION_LEVEL, ISOLATION_LEVEL}
 import org.apache.spark.sql.{DataFrame, Row}
@@ -767,6 +767,15 @@ object JdbcUtils extends Logging with SQLConfHelper {
         stmt.close()
       }
       if (supportsTransactions) {
+        // Only one attempt of a partition may commit, so a retried or speculative attempt does
+        // not insert the same rows again.
+        val ctx = TaskContext.get()
+        if (!SparkEnv.get.outputCommitCoordinator.canCommit(
+            ctx.stageId(), ctx.stageAttemptNumber(), ctx.partitionId(), ctx.attemptNumber())) {
+          throw new CommitDeniedException(
+            s"Not committed to $table because the driver did not authorize commit",
+            ctx.stageId(), ctx.partitionId(), ctx.attemptNumber())
+        }
         conn.commit()
       }
       committed = true
