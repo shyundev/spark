@@ -26,8 +26,9 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.WidenStatefulOpNullability
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, UnsafeRow}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
+import org.apache.spark.sql.catalyst.optimizer.NormalizeFloatingNumbers
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.datasources.v2.LowLatencyClock
@@ -108,8 +109,18 @@ case class TransformWithStateExec(
   // are not serializable.
   // Ideas for for improvement can be found here:
   // https://issues.apache.org/jira/browse/SPARK-50437
-  private lazy val getKeyObj =
-    ObjectOperator.deserializeRowToObject(keyDeserializer, groupingAttributes)
+  private lazy val getKeyObj = {
+    val toKeyObj = ObjectOperator.deserializeRowToObject(keyDeserializer, groupingAttributes)
+    // Normalize NaN and -0.0 in floating-point grouping keys, so that the keys grouped
+    // together within a batch are mapped to the same state across batches.
+    if (groupingAttributes.exists(a => NormalizeFloatingNumbers.needNormalize(a.dataType))) {
+      val normalizeKey = UnsafeProjection.create(
+        groupingAttributes.map(NormalizeFloatingNumbers.normalize), groupingAttributes)
+      (keyRow: InternalRow) => toKeyObj(normalizeKey(keyRow))
+    } else {
+      toKeyObj
+    }
+  }
 
   private lazy val getValueObj =
     ObjectOperator.deserializeRowToObject(valueDeserializer, dataAttributes)

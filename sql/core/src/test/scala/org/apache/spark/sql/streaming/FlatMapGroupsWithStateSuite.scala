@@ -761,6 +761,27 @@ class FlatMapGroupsWithStateSuite extends StateStoreMetricsTest {
     )
   }
 
+  test("SPARK-XXXXX: mapGroupsWithState - NaN and -0.0 keys share state across batches") {
+    val stateFunc = (key: Double, values: Iterator[Double], state: GroupState[Long]) => {
+      val count = state.getOption.getOrElse(0L) + values.size
+      state.update(count)
+      (key, count)
+    }
+    val nonCanonicalNaN = java.lang.Double.longBitsToDouble(0x7ff8000000000001L)
+
+    val inputData = MemoryStream[Double]
+    val result = inputData.toDS().groupByKey(x => x).mapGroupsWithState(stateFunc)
+
+    testStream(result, Update)(
+      AddData(inputData, 0.0, Double.NaN),
+      CheckNewAnswer((0.0, 1L), (Double.NaN, 1L)),
+      assertNumStateRows(total = 2, updated = 2),
+      AddData(inputData, -0.0, nonCanonicalNaN),
+      CheckNewAnswer((0.0, 2L), (Double.NaN, 2L)),
+      assertNumStateRows(total = 2, updated = 2)
+    )
+  }
+
   test("mapGroupsWithState - batch") {
     // Test the following
     // - no initial state

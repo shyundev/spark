@@ -27,7 +27,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.WidenStatefulOpNullability
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Ascending, Attribute, Expression, SortOrder, UnsafeRow}
+import org.apache.spark.sql.catalyst.expressions.{Ascending, Attribute, Expression, SortOrder, UnsafeProjection, UnsafeRow}
+import org.apache.spark.sql.catalyst.optimizer.NormalizeFloatingNumbers
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.execution._
@@ -285,6 +286,21 @@ trait FlatMapGroupsWithStateExecBase
       None
     }
 
+    // Normalize NaN and -0.0 in floating-point grouping keys, so that the keys grouped
+    // together within a batch are mapped to the same state across batches.
+    private val normalizeKey: Option[UnsafeProjection] =
+      if (groupingAttributes.exists(a => NormalizeFloatingNumbers.needNormalize(a.dataType))) {
+        Some(UnsafeProjection.create(
+          groupingAttributes.map(NormalizeFloatingNumbers.normalize), groupingAttributes))
+      } else {
+        None
+      }
+
+    private def toStateKey(keyRow: InternalRow): UnsafeRow = normalizeKey match {
+      case Some(proj) => proj(keyRow).copy()
+      case None => keyRow.asInstanceOf[UnsafeRow]
+    }
+
     // Metrics
     protected val numUpdatedStateRows: SQLMetric = longMetric("numUpdatedStateRows")
     protected val numOutputRows: SQLMetric = longMetric("numOutputRows")
@@ -297,7 +313,7 @@ trait FlatMapGroupsWithStateExecBase
     def processNewData(dataIter: Iterator[InternalRow]): Iterator[InternalRow] = {
       val groupedIter = GroupedIterator(dataIter, groupingAttributes, child.output)
       groupedIter.flatMap { case (keyRow, valueRowIter) =>
-        val keyUnsafeRow = keyRow.asInstanceOf[UnsafeRow]
+        val keyUnsafeRow = toStateKey(keyRow)
         callFunctionAndUpdateState(
           stateManager.getState(store, keyUnsafeRow),
           valueRowIter,
@@ -329,7 +345,7 @@ trait FlatMapGroupsWithStateExecBase
       new CoGroupedIterator(
           groupedChildDataIter, groupedInitialStateIter, groupingAttributes).flatMap {
         case (keyRow, valueRowIter, initialStateRowIter) =>
-          val keyUnsafeRow = keyRow.asInstanceOf[UnsafeRow]
+          val keyUnsafeRow = toStateKey(keyRow)
           var foundInitialStateForKey = false
           initialStateRowIter.foreach { initialStateRow =>
             if (foundInitialStateForKey) {

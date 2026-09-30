@@ -1154,6 +1154,44 @@ abstract class TransformWithStateSuite extends StateStoreMetricsTest
     }
   }
 
+  test("SPARK-XXXXX: transformWithState - NaN and -0.0 keys share state across batches") {
+    class RunningCountByDoubleKey extends StatefulProcessor[Double, Double, (Double, Long)] {
+      @transient protected var _countState: ValueState[Long] = _
+
+      override def init(outputMode: OutputMode, timeMode: TimeMode): Unit = {
+        _countState = getHandle.getValueState[Long]("countState", Encoders.scalaLong,
+          TTLConfig.NONE)
+      }
+
+      override def handleInputRows(
+          key: Double,
+          inputRows: Iterator[Double],
+          timerValues: TimerValues): Iterator[(Double, Long)] = {
+        val count = Option(_countState.get()).getOrElse(0L) + inputRows.size
+        _countState.update(count)
+        Iterator((key, count))
+      }
+    }
+
+    withSQLConf(SQLConf.STATE_STORE_PROVIDER_CLASS.key ->
+      classOf[RocksDBStateStoreProvider].getName,
+      SQLConf.SHUFFLE_PARTITIONS.key ->
+      TransformWithStateSuiteUtils.NUM_SHUFFLE_PARTITIONS.toString) {
+      val nonCanonicalNaN = java.lang.Double.longBitsToDouble(0x7ff8000000000001L)
+      val inputData = MemoryStream[Double]
+      val result = inputData.toDS()
+        .groupByKey(x => x)
+        .transformWithState(new RunningCountByDoubleKey(), TimeMode.None(), OutputMode.Update())
+
+      testStream(result, OutputMode.Update())(
+        AddData(inputData, 0.0, Double.NaN),
+        CheckNewAnswer((0.0, 1L), (Double.NaN, 1L)),
+        AddData(inputData, -0.0, nonCanonicalNaN),
+        CheckNewAnswer((0.0, 2L), (Double.NaN, 2L))
+      )
+    }
+  }
+
   test("transformWithState - streaming with rocksdb should succeed") {
     withSQLConf(SQLConf.STATE_STORE_PROVIDER_CLASS.key ->
       classOf[RocksDBStateStoreProvider].getName,
