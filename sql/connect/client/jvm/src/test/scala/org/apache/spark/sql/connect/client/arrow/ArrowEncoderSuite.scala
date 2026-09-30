@@ -586,6 +586,12 @@ class ArrowEncoderSuite extends ConnectFunSuite {
     doubleIterator.close()
   }
 
+  test("SPARK-XXXXX: durations longer than Long.MaxValue nanoseconds") {
+    roundTripAndCheckIdentical(DayTimeIntervalEncoder) { () =>
+      Iterator(Duration.ofDays(200000), Duration.ofDays(-200000), Duration.ofDays(106751991))
+    }
+  }
+
   test("nullable fields") {
     val encoder = ScalaReflection.encoderFor[NullableData]
     // SPARK-44457: Similar to SPARK-42770, calling `truncatedTo(ChronoUnit.MICROS)`

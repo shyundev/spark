@@ -242,7 +242,8 @@ private[arrow] class ViewVarBinaryVectorReader(v: ViewVarBinaryVector)
 
 private[arrow] class DurationVectorReader(v: DurationVector)
     extends TypedArrowVectorReader[DurationVector](v) {
-  override def getDuration(i: Int): Duration = vector.getObject(i)
+  override def getDuration(i: Int): Duration =
+    SparkIntervalUtils.microsToDuration(DurationVector.get(vector.getDataBuffer, i))
   override def getString(i: Int): String = {
     SparkIntervalUtils.toDayTimeIntervalString(
       SparkIntervalUtils.durationToMicros(getDuration(i)),
