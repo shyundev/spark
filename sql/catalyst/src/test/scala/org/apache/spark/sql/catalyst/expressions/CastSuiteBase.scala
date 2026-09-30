@@ -2144,6 +2144,21 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
       }
   }
 
+  test("SPARK-38520: Cast string to single-field day-time interval past the max value") {
+    Seq(("106751992", DayTimeIntervalType(DAY)),
+      ("2562047789", DayTimeIntervalType(HOUR)),
+      ("153722867281", DayTimeIntervalType(MINUTE))).foreach { case (value, dataType) =>
+      val unit = DayTimeIntervalType.fieldToString(dataType.startField).toUpperCase(Locale.ROOT)
+      Seq(value, s"-$value", s"INTERVAL '$value' $unit", s"INTERVAL -'$value' $unit")
+        .foreach { interval =>
+          checkErrorInExpression[SparkIllegalArgumentException](
+            cast(Literal.create(interval), dataType),
+            "INVALID_INTERVAL_FORMAT.INTERVAL_PARSING",
+            Map("interval" -> "day-time", "input" -> interval))
+        }
+    }
+  }
+
   test("cast ANSI intervals to/from decimals") {
     Seq(
       (Duration.ZERO, DayTimeIntervalType(DAY), DecimalType(10, 3)) -> Decimal(0, 10, 3),

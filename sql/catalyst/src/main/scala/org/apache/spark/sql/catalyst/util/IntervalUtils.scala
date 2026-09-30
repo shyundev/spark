@@ -332,11 +332,11 @@ object IntervalUtils extends SparkIntervalUtils {
           val sign = finalSign(firstSign)
           (startField, endField) match {
             case (DT.DAY, DT.DAY) if suffix == null && value.length <= 9 =>
-              sign * value.toLong * MICROS_PER_DAY
+              sign * toLongWithRange(dayStr, value, 0, MAX_DAY) * MICROS_PER_DAY
             case (DT.HOUR, DT.HOUR) if suffix == null && value.length <= 10 =>
-              sign * value.toLong * MICROS_PER_HOUR
+              sign * toLongWithRange(hourStr, value, 0, MAX_HOUR) * MICROS_PER_HOUR
             case (DT.MINUTE, DT.MINUTE) if suffix == null && value.length <= 12 =>
-              sign * value.toLong * MICROS_PER_MINUTE
+              sign * toLongWithRange(minuteStr, value, 0, MAX_MINUTE) * MICROS_PER_MINUTE
             case (DT.SECOND, DT.SECOND) if value.length <= 13 =>
               sign match {
                 case 1 => parseSecondNano(secondAndMicro(value, suffix))
@@ -351,13 +351,13 @@ object IntervalUtils extends SparkIntervalUtils {
           val sign = finalSign(firstSign, secondSign)
           unit.toUpperCase(Locale.ROOT) match {
             case "DAY" if suffix == null && value.length <= 9 && checkTargetType(DT.DAY, DT.DAY) =>
-              sign * value.toLong * MICROS_PER_DAY
+              sign * toLongWithRange(dayStr, value, 0, MAX_DAY) * MICROS_PER_DAY
             case "HOUR" if suffix == null && value.length <= 10
               && checkTargetType(DT.HOUR, DT.HOUR) =>
-              sign * value.toLong * MICROS_PER_HOUR
+              sign * toLongWithRange(hourStr, value, 0, MAX_HOUR) * MICROS_PER_HOUR
             case "MINUTE" if suffix == null && value.length <= 12
               && checkTargetType(DT.MINUTE, DT.MINUTE) =>
-              sign * value.toLong * MICROS_PER_MINUTE
+              sign * toLongWithRange(minuteStr, value, 0, MAX_MINUTE) * MICROS_PER_MINUTE
             case "SECOND" if value.length <= 13 && checkTargetType(DT.SECOND, DT.SECOND) =>
               sign match {
                 case 1 => parseSecondNano(secondAndMicro(value, suffix))
