@@ -223,6 +223,31 @@ class ResolveDeduplicateSuite extends AnalysisTest {
     assert(recomputedKeys === legacyKeys)
   }
 
+  test("SPARK-XXXXX: recomputation excludes columns added after the deduplication boundary") {
+    val d = $"d".int
+    val relation = LocalRelation(c, a, b, d)
+    // Model ResolveMissingReferences adding a column referenced by a filter above the
+    // deduplication after the keys were resolved.
+    val childAtDeduplication = Project(Seq(c, a, b), relation)
+    val childAfterMissingReference = Project(Seq(c, a, b, d), relation)
+    val originalKeys = childAtDeduplication.output
+    val specs = Seq(
+      DeduplicateSpec(DeduplicateAllColumnsAsKey, viaSparkClassic = true),
+      DeduplicateSpec(DeduplicateAllColumnsAsKey, viaSparkClassic = false))
+
+    for (spec <- specs; orderDeterministically <- Seq(false, true)) {
+      val expectedKeys = ResolveDeduplicate.computeKeys(
+        childAtDeduplication, spec, orderDeterministically, SQLConf.get.resolver)
+      val recomputedKeys = ResolveDeduplicate.recomputeKeysPreservingMetadataBoundary(
+        originalKeys, childAfterMissingReference, spec, orderDeterministically,
+        SQLConf.get.resolver)
+
+      withClue(s"spec=$spec, orderDeterministically=$orderDeterministically: ") {
+        assert(recomputedKeys === expectedKeys)
+      }
+    }
+  }
+
   test("SPARK-57489: duplicate-named columns produce multiple keys (filter, not find)") {
     val a2 = $"a".int
     val dupRel = LocalRelation(a, a2)

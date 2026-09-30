@@ -19,7 +19,7 @@ package org.apache.spark.sql.catalyst.analysis
 
 import scala.collection.mutable
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, MetadataAttribute}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet}
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, DeduplicateAllColumnsAsKey, DeduplicateKeyColumns, DeduplicateSpec, DeduplicateWithinWatermark, LogicalPlan, Project}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.UNRESOLVED_DEDUPLICATE
@@ -90,9 +90,10 @@ object ResolveDeduplicate extends Rule[LogicalPlan] {
   }
 
   /**
-   * Recomputes batch and streaming deduplication keys while preserving which metadata columns were
-   * visible at the original deduplication boundary. Analyzer rules may add metadata columns to the
-   * child later to satisfy downstream references, but those columns must not silently become keys.
+   * Recomputes batch and streaming deduplication keys while preserving which columns were visible
+   * at the original deduplication boundary. Analyzer rules may add columns to the child later to
+   * satisfy downstream references, such as metadata columns or columns referenced by a filter
+   * above the deduplication, but those columns must not silently become keys.
    */
   def recomputeKeysPreservingMetadataBoundary(
       originalKeys: Seq[Attribute],
@@ -100,12 +101,9 @@ object ResolveDeduplicate extends Rule[LogicalPlan] {
       spec: DeduplicateSpec,
       orderDeterministically: Boolean,
       resolver: Resolver): Seq[Attribute] = {
-    val originalMetadataKeys = AttributeSet(
-      originalKeys.filter(key => MetadataAttribute.isValid(key.metadata)))
-    val outputAtMetadataBoundary = child.output.filter { attribute =>
-      !MetadataAttribute.isValid(attribute.metadata) || originalMetadataKeys.contains(attribute)
-    }
-    computeKeys(Project(outputAtMetadataBoundary, child), spec, orderDeterministically, resolver)
+    val originalKeySet = AttributeSet(originalKeys)
+    val outputAtBoundary = child.output.filter(originalKeySet.contains)
+    computeKeys(Project(outputAtBoundary, child), spec, orderDeterministically, resolver)
   }
 
   /**

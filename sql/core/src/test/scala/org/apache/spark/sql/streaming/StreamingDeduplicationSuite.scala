@@ -150,6 +150,20 @@ class StreamingDeduplicationSuite extends StateStoreMetricsTest
     )
   }
 
+  test("SPARK-XXXXX: deduplicate with all columns referenced by a filter on a projected column") {
+    val inputData = MemoryStream[(String, Int)]
+    val result = inputData.toDF().toDF("k", "v").select("k").dropDuplicates().where($"v" > 0)
+
+    testStream(result, Append)(
+      AddData(inputData, "a" -> 1),
+      CheckNewAnswer("a"),
+      assertNumStateRows(total = 1, updated = 1),
+      AddData(inputData, "a" -> 2, "b" -> 3), // "a" is dropped
+      CheckNewAnswer("b"),
+      assertNumStateRows(total = 2, updated = 1)
+    )
+  }
+
   test("multiple deduplicates") {
     val inputData = MemoryStream[(String, Int)]
     val result = inputData.toDS().dropDuplicates().dropDuplicates("_1")

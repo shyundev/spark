@@ -119,6 +119,26 @@ class StreamingDeduplicationWithinWatermarkSuite extends StateStoreMetricsTest
     )
   }
 
+  test("SPARK-XXXXX: deduplicate with all columns referenced by a filter on a projected column") {
+    val inputData = MemoryStream[(String, Int, Int)]
+    val result = inputData.toDF().toDF("k", "time", "v")
+      .withColumn("eventTime", timestamp_seconds($"time"))
+      .withWatermark("eventTime", "10 seconds")
+      .select("k", "eventTime")
+      .dropDuplicatesWithinWatermark()
+      .where($"v" > 0)
+      .select($"k", $"eventTime".cast("long").as("time"))
+
+    testStream(result, Append)(
+      AddData(inputData, ("a", 10, 1)),
+      CheckNewAnswer(("a", 10L)),
+      assertNumStateRows(total = 1, updated = 1),
+      AddData(inputData, ("a", 10, 2), ("b", 10, 3)), // ("a", 10) is dropped
+      CheckNewAnswer(("b", 10L)),
+      assertNumStateRows(total = 2, updated = 1)
+    )
+  }
+
   test("deduplicate with subset of columns which event time column is not in subset") {
     val inputData = MemoryStream[(String, Int)]
     val result = inputData.toDS()
