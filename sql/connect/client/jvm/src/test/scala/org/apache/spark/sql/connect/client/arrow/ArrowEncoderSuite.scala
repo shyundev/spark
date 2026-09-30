@@ -100,7 +100,8 @@ class ArrowEncoderSuite extends ConnectFunSuite {
       maxRecordsPerBatch: Int = 4 * 1024,
       maxBatchSize: Long = 16 * 1024,
       batchSizeCheckInterval: Int = 128,
-      inspectBatch: Array[Byte] => Unit = null): CloseableIterator[O] = {
+      inspectBatch: Array[Byte] => Unit = null,
+      timeZoneId: String = "UTC"): CloseableIterator[O] = {
     // Use different allocators so we can pinpoint memory leaks better.
     val serializerAllocator = newAllocator("serialization")
     val deserializerAllocator = newAllocator("deserialization")
@@ -113,7 +114,7 @@ class ArrowEncoderSuite extends ConnectFunSuite {
         maxRecordsPerBatch = maxRecordsPerBatch,
         maxBatchSize = maxBatchSize,
         batchSizeCheckInterval = batchSizeCheckInterval,
-        timeZoneId = "UTC",
+        timeZoneId = timeZoneId,
         largeVarTypes = false)
 
       val inspectedIterator = if (inspectBatch != null) {
@@ -130,7 +131,7 @@ class ArrowEncoderSuite extends ConnectFunSuite {
           inspectedIterator,
           outputEncoder,
           deserializerAllocator,
-          timeZoneId = "UTC")
+          timeZoneId = timeZoneId)
       new CloseableIterator[O] {
         override def close(): Unit = {
           arrowIterator.close()
@@ -1221,6 +1222,32 @@ class ArrowEncoderSuite extends ConnectFunSuite {
       })
   UpCastTestCase(BinaryEncoder, i => Array.tabulate(10)(j => (64 + j + i).toByte))
     .test(StringEncoder, bytes => SparkStringUtils.getHexString(bytes))
+
+  test("SPARK-XXXXX: upcast to datetime types in a non-UTC time zone") {
+    val zoneId = "America/Los_Angeles"
+    def upCast[I, O](input: AgnosticEncoder[I], output: AgnosticEncoder[O], value: I): O = {
+      val result = roundTripWithDifferentIOEncoders(
+        input,
+        output,
+        Iterator.single(value),
+        timeZoneId = zoneId)
+      try result.next()
+      finally result.close()
+    }
+    val localDateTime = java.time.LocalDateTime.of(2020, 1, 1, 0, 0)
+    val instant = localDateTime.atZone(java.time.ZoneId.of(zoneId)).toInstant
+    assert(upCast(InstantEncoder(false), LocalDateTimeEncoder, instant) === localDateTime)
+    assert(upCast(LocalDateTimeEncoder, InstantEncoder(false), localDateTime) === instant)
+    assert(
+      upCast(LocalDateTimeEncoder, TimestampEncoder(false), localDateTime) ===
+        java.sql.Timestamp.from(instant))
+    assert(
+      upCast(LocalDateEncoder(false), LocalDateTimeEncoder, localDateTime.toLocalDate) ===
+        localDateTime)
+    assert(
+      upCast(PrimitiveLongEncoder, InstantEncoder(false), 1L) ===
+        java.time.Instant.ofEpochSecond(1))
+  }
 
   /* ******************************************************************** *
    * Arrow serialization/deserialization specific errors

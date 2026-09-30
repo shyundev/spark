@@ -165,7 +165,7 @@ private[arrow] class BigIntVectorReader(v: BigIntVector)
   override def getString(i: Int): String = String.valueOf(getLong(i))
   override def getJavaDecimal(i: Int): JBigDecimal = JBigDecimal.valueOf(getLong(i))
   override def getTimestamp(i: Int): Timestamp = toJavaTimestamp(getLong(i) * MICROS_PER_SECOND)
-  override def getInstant(i: Int): Instant = microsToInstant(getLong(i))
+  override def getInstant(i: Int): Instant = microsToInstant(getLong(i) * MICROS_PER_SECOND)
 }
 
 private[arrow] class Float4VectorReader(v: Float4Vector)
@@ -274,7 +274,8 @@ private[arrow] class DateDayVectorReader(v: DateDayVector, timeZoneId: String)
   override def getLocalDate(i: Int): LocalDate = daysToLocalDate(days(i))
   override def getTimestamp(i: Int): Timestamp = toJavaTimestamp(micros(i))
   override def getInstant(i: Int): Instant = microsToInstant(micros(i))
-  override def getLocalDateTime(i: Int): LocalDateTime = microsToLocalDateTime(micros(i))
+  override def getLocalDateTime(i: Int): LocalDateTime =
+    microsToLocalDateTime(daysToMicros(days(i), ZoneOffset.UTC))
   override def getString(i: Int): String = formatter.format(getLocalDate(i))
 }
 
@@ -282,7 +283,7 @@ private[arrow] class TimeStampMicroTZVectorReader(v: TimeStampMicroTZVector)
     extends TypedArrowVectorReader[TimeStampMicroTZVector](v) {
   private val zone = getZoneId(v.getTimeZone)
   private lazy val formatter = TimestampFormatter.getFractionFormatter(zone)
-  private def utcMicros(i: Int): Long = convertTz(vector.get(i), zone, ZoneOffset.UTC)
+  private def utcMicros(i: Int): Long = convertTz(vector.get(i), ZoneOffset.UTC, zone)
   override def getLong(i: Int): Long = Math.floorDiv(vector.get(i), MICROS_PER_SECOND)
   override def getTimestamp(i: Int): Timestamp = toJavaTimestamp(vector.get(i))
   override def getInstant(i: Int): Instant = microsToInstant(vector.get(i))
@@ -294,7 +295,7 @@ private[arrow] class TimeStampMicroVectorReader(v: TimeStampMicroVector, timeZon
     extends TypedArrowVectorReader[TimeStampMicroVector](v) {
   private val zone = getZoneId(timeZoneId)
   private lazy val formatter = TimestampFormatter.getFractionFormatter(ZoneOffset.UTC)
-  private def tzMicros(i: Int): Long = convertTz(utcMicros(i), ZoneOffset.UTC, zone)
+  private def tzMicros(i: Int): Long = convertTz(utcMicros(i), zone, ZoneOffset.UTC)
   private def utcMicros(i: Int): Long = vector.get(i)
   override def getTimestamp(i: Int): Timestamp = toJavaTimestamp(tzMicros(i))
   override def getInstant(i: Int): Instant = microsToInstant(tzMicros(i))
