@@ -560,6 +560,14 @@ class ArithmeticExpressionSuite extends SparkFunSuite with ExpressionEvalHelper 
     }
   }
 
+  test("SPARK-45438: UnaryMinus and Abs keep all digits of a decimal with precision 38") {
+    val pos = Decimal(new java.math.BigDecimal("12345678901234567890123456789012345678"), 38, 0)
+    val neg = Decimal(new java.math.BigDecimal("-12345678901234567890123456789012345678"), 38, 0)
+    checkEvaluation(UnaryMinus(Literal(pos)), neg)
+    checkEvaluation(UnaryMinus(Literal(neg)), pos)
+    checkEvaluation(Abs(Literal(neg)), pos)
+  }
+
   test("pmod") {
     testNumericDataTypes { convert =>
       val left = Literal(convert(7))

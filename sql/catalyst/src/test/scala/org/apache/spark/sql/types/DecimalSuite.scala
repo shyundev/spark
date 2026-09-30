@@ -293,6 +293,19 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
     assert(Decimal(-100).abs === Decimal(BigDecimal("100")))
   }
 
+  test("SPARK-45438: negate & abs keep all digits of a decimal with precision 38") {
+    Seq(
+      ("12345678901234567890123456789012345678", 0),
+      ("1234567890123456789012345678901234.5678", 4),
+      ("99999999999999999999999999999999999999", 0)).foreach { case (str, scale) =>
+      val pos = Decimal(new java.math.BigDecimal(str), 38, scale)
+      val neg = Decimal(new java.math.BigDecimal(str).negate(), 38, scale)
+      assert(-pos === neg)
+      assert(-neg === pos)
+      assert(neg.abs === pos)
+    }
+  }
+
   test("floor & ceil") {
     assert(Decimal("10.03").floor === Decimal(BigDecimal("10")))
     assert(Decimal("10.03").ceil === Decimal(BigDecimal("11")))
