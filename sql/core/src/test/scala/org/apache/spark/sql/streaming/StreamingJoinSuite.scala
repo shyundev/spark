@@ -586,6 +586,24 @@ abstract class StreamingInnerJoinBase extends StreamingJoinSuite {
       CheckAnswer((3, 3, 3), (1, 1, 1), (1, 1, 6), (2, 2, 2), (1, 6, 1), (1, 6, 6)))
   }
 
+  test("SPARK-XXXXX: stream stream inner join does not match null join keys") {
+    val input1 = MemoryStream[(Int, Int)]
+    val input2 = MemoryStream[(Int, Int)]
+
+    val df1 = input1.toDF().toDF("leftKey", "leftValue")
+    val df2 = input2.toDF().toDF("rightKey", "rightValue")
+    // Join keys that are null for non-positive values, so that nulls reach the join.
+    val joined = df1.join(df2,
+      when($"leftKey" > 0, $"leftKey") === when($"rightKey" > 0, $"rightKey"))
+
+    testStream(joined)(
+      AddData(input1, (1, 10), (-1, 20)),
+      CheckNewAnswer(),
+      AddData(input2, (1, 30), (-2, 40)),
+      CheckNewAnswer((1, 10, 1, 30))
+    )
+  }
+
   test("locality preferences of StateStoreAwareZippedRDD") {
     import StreamingSymmetricHashJoinHelper._
 
@@ -2005,6 +2023,30 @@ abstract class StreamingFullOuterJoinBase extends StreamingJoinSuite {
       )
     }
     assert(e.getMessage.contains("is not supported in Update output mode"))
+  }
+
+  test("SPARK-XXXXX: full outer join does not match null join keys") {
+    val leftInput = MemoryStream[(JInteger, Int)]
+    val rightInput = MemoryStream[(JInteger, Int)]
+
+    val df1 = leftInput.toDF().toDF("leftKey", "time")
+      .select($"leftKey", timestamp_seconds($"time") as "leftTime")
+      .withWatermark("leftTime", "10 seconds")
+    val df2 = rightInput.toDF().toDF("rightKey", "time")
+      .select($"rightKey", timestamp_seconds($"time") as "rightTime")
+      .withWatermark("rightTime", "10 seconds")
+    val joined = df1.join(df2,
+      expr("leftKey = rightKey AND leftTime BETWEEN rightTime - INTERVAL 5 SECONDS " +
+        "AND rightTime + INTERVAL 5 SECONDS"),
+      "full_outer")
+      .select($"leftKey", $"rightKey", $"leftTime".cast("int"), $"rightTime".cast("int"))
+
+    testStream(joined)(
+      AddData(leftInput, (JInteger.valueOf(1), 5), (null, 5)),
+      CheckNewAnswer(Row(null, null, 5, null)),
+      AddData(rightInput, (JInteger.valueOf(1), 6), (null, 6)),
+      CheckNewAnswer(Row(1, 1, 5, 6), Row(null, null, null, 6))
+    )
   }
 
   test("windowed full outer join") {

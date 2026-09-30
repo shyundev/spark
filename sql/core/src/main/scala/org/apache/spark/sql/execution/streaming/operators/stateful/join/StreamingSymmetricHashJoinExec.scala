@@ -820,12 +820,12 @@ case class StreamingSymmetricHashJoinExec(
 
       nonLateRows.flatMap { row =>
         val thisRow = row.asInstanceOf[UnsafeRow]
-        // If this row fails the pre join filter, that means it can never satisfy the full join
-        // condition no matter what other side row it's matched with. This allows us to avoid
-        // adding it to the state, and generate an outer join row immediately (or do nothing in
-        // the case of inner join).
-        if (preJoinFilter(thisRow)) {
-          val key = keyGenerator(thisRow)
+        // If this row fails the pre join filter or has a null join key, that means it can never
+        // satisfy the full join condition no matter what other side row it's matched with. This
+        // allows us to avoid adding it to the state, and generate an outer join row immediately
+        // (or do nothing in the case of inner join).
+        val key = if (preJoinFilter(thisRow)) keyGenerator(thisRow) else null
+        if (key != null && !key.anyNull) {
           // If the join type is Left Semi and this is the right side, we can remove the matched
           // row from the other (left) side's state, since the row won't be produced anymore for
           // the following input rows.
