@@ -146,6 +146,25 @@ class SeriesComputeMixin:
 
         self.assert_eq(psser.shift(periods=0), pser.shift(periods=0))
 
+    def test_shift_missing_values_and_non_numeric(self):
+        # SPARK-XXXXX: fill_value only fills the newly introduced positions.
+        pser = pd.Series([1.0, np.nan, 3.0, np.nan, 5.0], name="x")
+        psser = ps.from_pandas(pser)
+        self.assert_eq(psser.shift(1, fill_value=0), pser.shift(1, fill_value=0))
+        self.assert_eq(psser.shift(-1, fill_value=0), pser.shift(-1, fill_value=0))
+
+        for pser in [
+            pd.Series(pd.to_datetime(["2020-01-01", None, "2020-01-03"]), name="x"),
+            pd.Series(["a", None, "c"], name="x"),
+        ]:
+            psser = ps.from_pandas(pser)
+            self.assert_eq(psser.shift(1), pser.shift(1))
+            self.assert_eq(psser.shift(-1), pser.shift(-1))
+
+        pser = pd.Series([True, False, True], name="x")
+        psser = ps.from_pandas(pser)
+        self.assert_eq(psser.shift(1, fill_value=False), pser.shift(1, fill_value=False))
+
     def test_diff(self):
         pser = pd.Series([10, 20, 15, 30, 45], name="x")
         psser = ps.Series(pser)

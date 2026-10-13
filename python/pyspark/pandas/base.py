@@ -1291,9 +1291,10 @@ class IndexOpsMixin(object, metaclass=ABCMeta):
             .orderBy(NATURAL_ORDER_COLUMN_NAME)
             .rowsBetween(-periods, -periods)
         )
-        lag_col = F.lag(col, periods).over(window)
-        col = F.when(lag_col.isNull() | F.isnan(lag_col), fill_value).otherwise(lag_col)
-        return self._with_new_scol(col, field=self._internal.data_fields[0].copy(nullable=True))
+        col = F.lag(col, periods, fill_value).over(window)
+        field = self._internal.data_fields[0]
+        nullable = field.nullable or fill_value is None
+        return self._with_new_scol(col, field=field.copy(nullable=nullable))
 
     # TODO: Update Documentation for Bins Parameter when its supported
     def value_counts(
