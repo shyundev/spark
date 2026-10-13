@@ -126,8 +126,12 @@ class GroupedData:
 
         assert exprs, "exprs should not be empty"
         if len(exprs) == 1 and isinstance(exprs[0], dict):
-            # Convert the dict into key value pairs
-            aggregate_cols = [F._invoke_function(exprs[0][k], F.col(k)) for k in exprs[0]]
+            # Convert the dict into key value pairs, with the same method aliases as
+            # RelationalGroupedDataset.toAggCol.
+            aliases = {"average": "avg", "mean": "avg", "std": "stddev", "size": "count"}
+            aggregate_cols = [
+                F._invoke_function(aliases.get(v.lower(), v), F.col(k)) for k, v in exprs[0].items()
+            ]
         else:
             # Columns
             assert all(isinstance(c, Column) for c in exprs), "all exprs should be Column"

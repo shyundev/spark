@@ -70,6 +70,23 @@ class GroupTestsMixin:
         # test deprecated countDistinct
         self.assertEqual(100, g.agg(functions.countDistinct(df.value)).first()[0])
 
+    # SPARK-XXXXX: agg with a dict accepts the same method aliases as the Scala API
+    def test_agg_dict_method_aliases(self):
+        df = self.spark.createDataFrame([("a", 1), ("a", 3), ("b", 5)], ["k", "v"])
+        for method, name in [
+            ("average", "avg(v)"),
+            ("mean", "avg(v)"),
+            ("std", "stddev(v)"),
+            ("size", "count(v)"),
+        ]:
+            with self.subTest(method=method):
+                self.assertEqual(df.groupBy("k").agg({"v": method}).columns, ["k", name])
+
+        assertDataFrameEqual(
+            df.groupBy("k").agg({"v": "size"}),
+            [Row(**{"k": "a", "count(v)": 2}), Row(**{"k": "b", "count(v)": 1})],
+        )
+
     @unittest.skipIf(not have_pandas, pandas_requirement_message)
     @unittest.skipIf(not have_pyarrow, pyarrow_requirement_message)
     def test_group_by_ordinal(self):
