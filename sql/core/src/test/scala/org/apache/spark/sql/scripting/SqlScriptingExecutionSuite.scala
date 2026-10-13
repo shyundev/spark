@@ -3370,6 +3370,92 @@ class SqlScriptingExecutionSuite extends SharedSparkSession {
     verifySqlScriptResult(sqlScript, expected)
   }
 
+  test("SPARK-XXXXX: local variable - leaves inner scope that ends a conditional body") {
+    val sqlScript =
+      """
+        |BEGIN
+        |  DECLARE localVar = 1;
+        |  IF localVar = 1 THEN
+        |    BEGIN
+        |      DECLARE localVar = 2;
+        |      SELECT localVar;
+        |    END;
+        |  END IF;
+        |  SELECT localVar;
+        |  CASE localVar
+        |    WHEN 1 THEN
+        |      BEGIN
+        |        DECLARE localVar = 3;
+        |        SELECT localVar;
+        |      END;
+        |  END CASE;
+        |  SELECT localVar;
+        |END
+        |""".stripMargin
+
+    val expected = Seq(
+      Seq(Row(2)), // select localVar
+      Seq(Row(1)), // select localVar
+      Seq(Row(3)), // select localVar
+      Seq(Row(1)) // select localVar
+    )
+    verifySqlScriptResult(sqlScript, expected)
+  }
+
+  test("SPARK-XXXXX: local variable - leaves inner scope that ends a loop body") {
+    val sqlScript =
+      """
+        |BEGIN
+        |  DECLARE localVar = 1;
+        |  DECLARE i = 0;
+        |  WHILE i < 2 DO
+        |    SELECT localVar;
+        |    SET i = i + 1;
+        |    BEGIN
+        |      DECLARE localVar = 2;
+        |      SELECT localVar;
+        |    END;
+        |  END WHILE;
+        |  SELECT localVar;
+        |END
+        |""".stripMargin
+
+    val expected = Seq(
+      Seq(Row(1)), // select localVar
+      Seq(Row(2)), // select localVar
+      Seq(Row(1)), // select localVar
+      Seq(Row(2)), // select localVar
+      Seq(Row(1)) // select localVar
+    )
+    verifySqlScriptResult(sqlScript, expected)
+  }
+
+  test("SPARK-XXXXX: handler of inner scope that ends a conditional body is not active after it") {
+    val sqlScript =
+      """
+        |BEGIN
+        |  DECLARE flag = 0;
+        |  lbl: BEGIN
+        |    DECLARE EXIT HANDLER FOR DIVIDE_BY_ZERO SET flag = 1;
+        |    IF true THEN
+        |      BEGIN
+        |        DECLARE EXIT HANDLER FOR DIVIDE_BY_ZERO SET flag = 2;
+        |        SELECT 10;
+        |      END;
+        |    END IF;
+        |    SELECT 1 / 0;
+        |  END;
+        |  SELECT flag;
+        |END
+        |""".stripMargin
+
+    val expected = Seq(
+      Seq(Row(10)), // select 10
+      Seq(Row(1)) // select flag
+    )
+    verifySqlScriptResult(sqlScript, expected)
+  }
+
   test("local variable - inner inner scope -> inner scope -> session var") {
     withSessionVariable("localVar") {
       spark.sql("DECLARE VARIABLE localVar = 0")

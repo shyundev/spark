@@ -144,6 +144,10 @@ case class SqlScriptingInterpreter(session: SparkSession) {
     val statements = compoundBody.collection
       .map(st => transformTreeIntoExecutable(st, args, context)) match {
       case Nil => Seq(new NoOpStatementExec)
+      // A nested compound exits its scope when the enclosing body moves to the next statement.
+      // If the nested compound is the last statement, add a NO-OP so that its scope is still
+      // exited before the enclosing body ends.
+      case s if s.last.isInstanceOf[CompoundBodyExec] => s :+ new NoOpStatementExec
       case s => s
     }
 
