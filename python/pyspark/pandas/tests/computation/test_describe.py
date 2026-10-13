@@ -16,6 +16,8 @@
 #
 
 
+import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -160,6 +162,21 @@ class FrameDescribeMixin:
         msg = "Cannot describe a DataFrame without columns"
         with self.assertRaisesRegex(ValueError, msg):
             psdf.describe()
+
+    def test_describe_missing_values_and_non_string(self):
+        # SPARK-XXXXX: missing values are not counted for `top` and `freq`, and boolean and
+        # date columns are described like string columns.
+        pdf = pd.DataFrame(
+            {
+                "a": ["x", None, None, "y", "y"],
+                "b": [True, None, None, False, False],
+                "c": [None, None, datetime.date(2020, 1, 1), datetime.date(2020, 1, 1), None],
+            }
+        )
+        psdf = ps.from_pandas(pdf)
+        for col in pdf.columns:
+            self.assert_eq(psdf[col].describe(), pdf[col].describe().astype(str))
+        self.assert_eq(psdf.describe(), pdf.describe().astype(str))
 
     def test_describe_empty(self):
         # Empty DataFrame

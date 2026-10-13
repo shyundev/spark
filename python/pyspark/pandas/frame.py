@@ -10205,10 +10205,18 @@ defaultdict(<class 'list'>, {'col..., 'col...})]
             # Handling string type columns
             # We will retrieve the `count`, `unique`, `top` and `freq`.
             internal = self._internal.resolved_copy
-            exprs_string = [
-                internal.spark_column_for(psser._column_label) for psser in psser_string
-            ]
+            exprs_string = []
+            for psser in psser_string:
+                scol = internal.spark_column_for(psser._column_label)
+                # `summary` only handles numeric and string columns, so other types such as
+                # booleans and dates are described by their string values.
+                if isinstance(psser.spark.data_type, BooleanType):
+                    scol = F.when(scol, "True").when(~scol, "False")
+                elif not isinstance(psser.spark.data_type, StringType):
+                    scol = scol.cast(StringType())
+                exprs_string.append(scol.alias(internal.spark_column_name_for(psser._column_label)))
             sdf = internal.spark_frame.select(*exprs_string)
+            exprs_string = [scol_for(sdf, col) for col in sdf.columns]
 
             # Get `count` & `unique` for each column
             counts, uniques = map(lambda x: x[1:], sdf.summary("count", "count_distinct").take(2))
@@ -10222,7 +10230,10 @@ defaultdict(<class 'list'>, {'col..., 'col...})]
             if len(exprs_string) == 1:
                 # Fast path for single column (e.g. Series.describe): avoid unpivot overhead.
                 top, freq = (
-                    sdf.groupby(exprs_string[0]).count().sort("count", ascending=False).first()
+                    sdf.groupby(exprs_string[0])
+                    .agg(F.count(exprs_string[0]).alias("count"))
+                    .sort("count", ascending=False)
+                    .first()
                 )
                 tops = [str(top)]
                 freqs = [str(freq)]
@@ -10235,7 +10246,7 @@ defaultdict(<class 'list'>, {'col..., 'col...})]
                 rows = (
                     sdf.select(F.posexplode(F.array(*exprs_string)).alias("idx", "str_value"))
                     .groupby("idx", "str_value")
-                    .agg(F.negative(F.count("*")).alias("neg_count"))
+                    .agg(F.negative(F.count("str_value")).alias("neg_count"))
                     .groupby("idx")
                     .agg(F.min(F.struct("neg_count", "str_value")).alias("s"))
                     .sort("idx")
