@@ -344,6 +344,41 @@ class SqlScriptingExecutionSuite extends SharedSparkSession {
     verifySqlScriptResult(sqlScript, expected = expected)
   }
 
+  test("SPARK-XXXXX: error without SQLSTATE is thrown as is") {
+    val sqlScript =
+      """
+        |BEGIN
+        |  SELECT sum(row_number() OVER (ORDER BY id)) FROM range(3);
+        |END
+        |""".stripMargin
+    val e = intercept[AnalysisException] {
+      verifySqlScriptResult(sqlScript, Seq.empty[Seq[Row]])
+    }
+    checkError(
+      exception = e,
+      condition = "_LEGACY_ERROR_TEMP_1031",
+      parameters = Map.empty)
+  }
+
+  test("SPARK-XXXXX: SQLEXCEPTION handler catches errors without condition or SQLSTATE") {
+    val sqlScript =
+      """
+        |BEGIN
+        |  DECLARE flag INT = 0;
+        |  BEGIN
+        |    DECLARE EXIT HANDLER FOR SQLEXCEPTION SET flag = flag + 1;
+        |    SELECT sum(row_number() OVER (ORDER BY id)) FROM range(3);
+        |  END;
+        |  BEGIN
+        |    DECLARE EXIT HANDLER FOR SQLEXCEPTION SET flag = flag + 10;
+        |    SELECT reflect('java.lang.Integer', 'parseInt', concat('x', id)) FROM range(1);
+        |  END;
+        |  SELECT flag;
+        |END
+        |""".stripMargin
+    verifySqlScriptResult(sqlScript, expected = Seq(Seq(Row(11))))
+  }
+
   test("exit handler - exit resolve in the same block") {
     val sqlScript =
       """

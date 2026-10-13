@@ -495,8 +495,9 @@ class SqlScriptingExecutionScope(
   def findHandler(condition: String, sqlState: String): Option[ExceptionHandlerExec] = {
     // Check if there is a specific handler for the given condition.
     var errorHandler: Option[ExceptionHandlerExec] = None
-    val uppercaseCondition = condition.toUpperCase(Locale.ROOT)
-    val uppercaseSqlState = sqlState.toUpperCase(Locale.ROOT)
+    // Errors without an error condition or a SQLSTATE report them as null.
+    val uppercaseCondition = Option(condition).getOrElse("").toUpperCase(Locale.ROOT)
+    val uppercaseSqlState = Option(sqlState).getOrElse("").toUpperCase(Locale.ROOT)
 
     errorHandler = triggerToExceptionHandlerMap.getHandlerForCondition(uppercaseCondition)
 
