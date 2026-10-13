@@ -861,21 +861,11 @@ public class CollationAwareUTF8String {
         startIdx = searchIdx + 1;
       }
     } else {
-      // Convert startIdx to the exclusive right boundary needed by lowercaseMatchLengthUntil.
-      startIdx = startIdx + lowercasePattern.numChars();
-      if (startIdx > target.numChars()) startIdx = target.numChars();
-      // Backward search
-      while (remaining > 0) {
-        // Find the matching length (substring in the target) of the first
-        // occurrence of lowercasePattern from startIdx (not included) in the target.
-        int matchLength = lowercaseMatchLengthUntil(target, lowercasePattern, startIdx);
-        if (matchLength != MATCH_NOT_FOUND) {
-          remaining--;
-          if (remaining == 0) searchIdx = startIdx - matchLength;
-        }
-        startIdx--;
-        if (startIdx < 0) return MATCH_NOT_FOUND;
+      // Backward search: candidate matches start at startIdx or before it.
+      for (int i = startIdx; i >= 0; --i) {
+        if (lowercaseMatchFrom(target, lowercasePattern, i) && --remaining == 0) return i;
       }
+      return MATCH_NOT_FOUND;
     }
     return searchIdx;
   }

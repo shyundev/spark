@@ -4278,6 +4278,11 @@ public class CollationSupportSuite {
     assertStringInstrWithOccurrence("İoi\u0307oİo", "İo", -2, 2, UNICODE_CI, 3);
     assertStringInstrWithOccurrence("İoi\u0307oİo", "İo", -2, 1, UTF8_LCASE, 6);
     assertStringInstrWithOccurrence("İoi\u0307oİo", "İo", -2, 2, UTF8_LCASE, 3);
+    // Negative start before a character that lowercases to two code points
+    assertStringInstrWithOccurrence("İİ", "İ", -2, 1, UTF8_BINARY, 1);
+    assertStringInstrWithOccurrence("İİ", "İ", -2, 1, UTF8_LCASE, 1);
+    assertStringInstrWithOccurrence("aİ", "İ", -2, 1, UTF8_BINARY, 0);
+    assertStringInstrWithOccurrence("aİ", "İ", -2, 1, UTF8_LCASE, 0);
     // Boundary: occurrence exceeds actual count
     assertStringInstrWithOccurrence("İoi\u0307oİo", "İo", 1, 4, UNICODE_CI, 0);
     assertStringInstrWithOccurrence("İoi\u0307oİo", "İo", -1, 4, UTF8_LCASE, 0);
