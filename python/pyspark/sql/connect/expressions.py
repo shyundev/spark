@@ -345,6 +345,11 @@ class LiteralExpression(Expression):
         elif isinstance(value, (str, np.str_)):
             return StringType()
         elif isinstance(value, decimal.Decimal):
+            # Derive the precision and scale from the value, like DecimalType.fromDecimal.
+            _, digits, exponent = value.as_tuple()
+            if isinstance(exponent, int):
+                scale = max(-exponent, 0)
+                return DecimalType(max(len(digits) + max(exponent, 0), scale), scale)
             return DecimalType()
         elif isinstance(value, datetime.datetime):
             return TimestampNTZType() if is_timestamp_ntz_preferred() else TimestampType()

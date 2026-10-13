@@ -21,6 +21,7 @@ import math
 import re
 import unittest
 from contextlib import redirect_stdout
+from decimal import Decimal
 from enum import Enum
 from inspect import getmembers, isclass, isfunction
 from itertools import chain
@@ -3391,6 +3392,23 @@ class FunctionsTestsMixin:
             errorClass="COLUMN_IN_LIST",
             messageParameters={"func_name": "lit"},
         )
+
+    # SPARK-XXXXX: the type of a decimal literal follows the precision and scale of the value
+    def test_lit_decimal(self):
+        for value, expected in [
+            ("1.230", "decimal(4,3)"),
+            ("-12", "decimal(2,0)"),
+            ("0.001", "decimal(3,3)"),
+            ("1E+3", "decimal(4,0)"),
+        ]:
+            with self.subTest(value=value):
+                df = self.spark.range(1).select(F.lit(Decimal(value)).alias("v"))
+                self.assertEqual(df.dtypes, [("v", expected)])
+
+        df = self.spark.sql("SELECT CAST('1.123456789012345678' AS DECIMAL(38, 18)) AS x")
+        res = df.select((df.x * Decimal("1.5")).alias("v"))
+        self.assertEqual(res.dtypes, [("v", "decimal(38,16)")])
+        self.assertEqual(res.first().v, Decimal("1.6851851835185185"))
 
     # Test added for SPARK-39832; change Python API to accept both col & str as input
     def test_regexp_replace(self):
