@@ -1273,6 +1273,10 @@ public class CollationSupportSuite {
       // Ligatures.
       assertUpper("ß ﬁ ﬃ ﬀ ﬆ ῗ", collationName,"SS FI FFI FF ST \u0399\u0308\u0342");
     }
+    // Locale-specific case mapping (e.g. Turkish dotted and dotless I).
+    assertUpper("istanbul", "TR", "İSTANBUL");
+    assertUpper("istanbul ş", "TR", "İSTANBUL Ş");
+    assertUpper("izmir", "AZ_CI", "İZMİR");
   }
 
   /**
@@ -1335,6 +1339,10 @@ public class CollationSupportSuite {
       // Ligatures.
       assertLower("ß ﬁ ﬃ ﬀ ﬆ ῗ", collationName,"ß ﬁ ﬃ ﬀ ﬆ ῗ");
     }
+    // Locale-specific case mapping (e.g. Turkish dotted and dotless I).
+    assertLower("ISTANBUL", "TR", "ıstanbul");
+    assertLower("ISTANBUL Ş", "TR", "ıstanbul ş");
+    assertLower("IZMIR", "AZ_CI", "ızmır");
   }
 
   /**

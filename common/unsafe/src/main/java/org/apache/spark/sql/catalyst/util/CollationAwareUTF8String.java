@@ -413,7 +413,9 @@ public class CollationAwareUTF8String {
    * @return the uppercase string
    */
   public static UTF8String toUpperCase(final UTF8String target, final int collationId) {
-    if (target.isFullAscii()) return target.toUpperCaseAscii();
+    if (target.isFullAscii() && !hasTurkicCaseMapping(collationId)) {
+      return target.toUpperCaseAscii();
+    }
     return toUpperCaseSlow(target, collationId);
   }
 
@@ -423,6 +425,16 @@ public class CollationAwareUTF8String {
     ULocale locale = CollationFactory.fetchCollation(collationId)
       .getCollator().getLocale(ULocale.ACTUAL_LOCALE);
     return UTF8String.fromString(UCharacter.toUpperCase(locale, target.toValidString()));
+  }
+
+  /**
+   * Returns whether the ICU collation uses Turkish or Azerbaijani case mapping, which maps the
+   * ASCII letters 'i' and 'I' to non-ASCII letters.
+   */
+  private static boolean hasTurkicCaseMapping(final int collationId) {
+    String language = CollationFactory.fetchCollation(collationId)
+      .getCollator().getLocale(ULocale.ACTUAL_LOCALE).getLanguage();
+    return language.equals("tr") || language.equals("az");
   }
 
   /**
@@ -449,7 +461,9 @@ public class CollationAwareUTF8String {
    * @return the lowercase string
    */
   public static UTF8String toLowerCase(final UTF8String target, final int collationId) {
-    if (target.isFullAscii()) return target.toLowerCaseAscii();
+    if (target.isFullAscii() && !hasTurkicCaseMapping(collationId)) {
+      return target.toLowerCaseAscii();
+    }
     return toLowerCaseSlow(target, collationId);
   }
 
