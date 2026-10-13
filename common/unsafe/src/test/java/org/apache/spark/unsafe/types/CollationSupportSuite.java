@@ -3288,6 +3288,9 @@ public class CollationSupportSuite {
     assertStringTrimLeft(UTF8_LCASE, "İ", "\u0307", "İ");
     assertStringTrimLeft(UTF8_LCASE, "Ixİ", "i\u0307", "xİ");
     assertStringTrimLeft(UTF8_LCASE, "IXİ", "ix\u0307", "İ");
+    assertStringTrimLeft(UTF8_BINARY, "ii", "İi", "");
+    assertStringTrimLeft(UTF8_LCASE, "ii", "İi", "");
+    assertStringTrimLeft(UTF8_LCASE, "Ix", "İix", "");
     assertStringTrimLeft(UTF8_LCASE, "xi\u0307", "\u0307IX", "");
     assertStringTrimLeft(UNICODE, "i", "i", "");
     assertStringTrimLeft(UNICODE, "iii", "I", "iii");
@@ -3586,6 +3589,8 @@ public class CollationSupportSuite {
     assertStringTrimRight(UTF8_LCASE, "Ixİ", "i\u0307", "Ixİ");
     assertStringTrimRight(UTF8_LCASE, "IXİ", "ix\u0307", "IXİ");
     assertStringTrimRight(UTF8_LCASE, "xi\u0307", "\u0307IX", "");
+    assertStringTrimRight(UTF8_BINARY, "x\u0307", "İ\u0307x", "");
+    assertStringTrimRight(UTF8_LCASE, "x\u0307", "İ\u0307x", "");
     assertStringTrimRight(UNICODE, "i", "i", "");
     assertStringTrimRight(UNICODE, "iii", "I", "iii");
     assertStringTrimRight(UNICODE, "I", "iii", "I");
@@ -3916,6 +3921,14 @@ public class CollationSupportSuite {
     assertStringTranslate("A\u030Aβφδi\u0307", "Iİaå", "1234", UTF8_LCASE, "3\u030Aβφδ2");
     assertStringTranslate("a\u030AβφδI\u0307", "Iİaå", "1234", UNICODE, "4βφδ2");
     assertStringTranslate("A\u030Aβφδi\u0307", "Iİaå", "1234", UNICODE_CI, "4βφδ2");
+    assertStringTranslate("ix", "İx", "12", UTF8_BINARY, "i2");
+    assertStringTranslate("ix", "İx", "12", UTF8_LCASE, "i2");
+    assertStringTranslate("ix", "İx", "12", UNICODE, "i2");
+    assertStringTranslate("ix", "İx", "12", UNICODE_CI, "i2");
+    assertStringTranslate("ii", "İi", "12", UTF8_BINARY, "22");
+    assertStringTranslate("ii", "İi", "12", UTF8_LCASE, "22");
+    assertStringTranslate("ii", "İi", "12", UNICODE, "22");
+    assertStringTranslate("ii", "İi", "12", UNICODE_CI, "22");
     // Conditional case mapping (e.g. Greek sigmas).
     assertStringTranslate("ΣΥΣΤΗΜΑΤΙΚΟΣ", "Συη", "σιι", UTF8_BINARY, "σΥσΤΗΜΑΤΙΚΟσ");
     assertStringTranslate("ΣΥΣΤΗΜΑΤΙΚΟΣ", "Συη", "σιι", UTF8_LCASE, "σισΤιΜΑΤΙΚΟσ");

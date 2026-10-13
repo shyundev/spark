@@ -1116,7 +1116,7 @@ public class CollationAwareUTF8String {
     // size 1 enables us to match two codepoints in the input string with a single codepoint in
     // the lowercase translation dictionary.
     int codePointBuffer = -1, codePoint;
-    while (inputIter.hasNext()) {
+    while (inputIter.hasNext() || codePointBuffer != -1) {
       if (codePointBuffer != -1) {
         codePoint = codePointBuffer;
         codePointBuffer = -1;
@@ -1145,8 +1145,6 @@ public class CollationAwareUTF8String {
       }
       // Skip the code point if it maps to the empty string.
     }
-    // Append the last code point if it was buffered.
-    if (codePointBuffer != -1) sb.appendCodePoint(codePointBuffer);
 
     // Return the translated string.
     return UTF8String.fromString(sb.toString());
@@ -1302,7 +1300,7 @@ public class CollationAwareUTF8String {
     // Iterate over `srcString` from the left to find the first character that is not in the set.
     int searchIndex = 0, codePoint, codePointBuffer = -1;
     Iterator<Integer> srcIter = srcString.codePointIterator();
-    while (srcIter.hasNext()) {
+    while (srcIter.hasNext() || codePointBuffer != -1) {
       // Get the next code point from either the buffer or the iterator.
       if (codePointBuffer != -1) {
         codePoint = codePointBuffer;
@@ -1529,7 +1527,7 @@ public class CollationAwareUTF8String {
       srcIter.next();
     }
 
-    while (srcIter.hasNext()) {
+    while (srcIter.hasNext() || codePointBuffer != -1) {
       if (codePointBuffer != -1) {
         codePoint = codePointBuffer;
         codePointBuffer = -1;
