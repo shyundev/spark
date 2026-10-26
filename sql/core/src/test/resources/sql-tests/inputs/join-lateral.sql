@@ -451,6 +451,10 @@ SELECT * FROM t1 JOIN LATERAL EXPLODE(ARRAY(c1, c2)) t(c3) ON t1.c1 = c3;
 SELECT * FROM t3 JOIN LATERAL EXPLODE(c2) t(c3) ON t3.c1 = c3;
 SELECT * FROM t3 LEFT JOIN LATERAL EXPLODE(c2) t(c3) ON t3.c1 = c3;
 
+-- SPARK-60564: left outer lateral join with table-valued functions and no join condition
+SELECT * FROM t3 LEFT JOIN LATERAL EXPLODE(c2);
+SELECT * FROM t3 LEFT JOIN LATERAL (SELECT 1 AS c, col FROM EXPLODE(c2));
+
 -- lateral join with table-valued functions in lateral subqueries
 SELECT * FROM t1, LATERAL (SELECT * FROM EXPLODE(ARRAY(c1, c2)));
 SELECT * FROM t1, LATERAL (SELECT t1.c1 + c3 FROM EXPLODE(ARRAY(c1, c2)) t(c3));

@@ -1127,8 +1127,10 @@ object OptimizeOneRowRelationSubquery extends Rule[LogicalPlan] {
    */
   private def rewrite(plan: LogicalPlan): LogicalPlan = plan.transformUpWithSubqueries {
     case LateralJoin(
-      left, right @ LateralSubquery(OneRowSubquery(plan), _, _, _, _), _, None)
-        if !hasCorrelatedSubquery(right.plan) && right.joinCond.isEmpty =>
+      left, right @ LateralSubquery(OneRowSubquery(plan), _, _, _, _), joinType, None)
+        if !hasCorrelatedSubquery(right.plan) && right.joinCond.isEmpty &&
+          // A generator can return no rows for a left row, which a left outer join must keep.
+          !(joinType == LeftOuter && plan.exists(_.isInstanceOf[Generate])) =>
       plan match {
         case Project(projectList, _: OneRowRelation) =>
           val newPList = stripOuterReferences(projectList)

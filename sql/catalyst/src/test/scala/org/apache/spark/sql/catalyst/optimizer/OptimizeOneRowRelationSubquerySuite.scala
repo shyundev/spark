@@ -201,4 +201,14 @@ class OptimizeOneRowRelationSubquerySuite extends PlanTest {
     optimized.exists(_.isInstanceOf[Generate])
     assertHasDomainJoin(optimized)
   }
+
+  test("SPARK-60564: should not optimize left outer lateral join with Generate") {
+    // SELECT * FROM t3 LEFT JOIN LATERAL EXPLODE(arr)
+    val query1 = t3.lateralJoin(t0.generate(Explode($"arr")), LeftOuter)
+    assertHasDomainJoin(Optimize.execute(query1.analyze))
+
+    // SELECT * FROM t3 LEFT JOIN LATERAL (SELECT col + 1 FROM EXPLODE(arr))
+    val query2 = t3.lateralJoin(t0.generate(Explode($"arr")).select($"col" + 1), LeftOuter)
+    assertHasDomainJoin(Optimize.execute(query2.analyze))
+  }
 }

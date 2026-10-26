@@ -1477,6 +1477,30 @@ NULL	[4]	NULL
 
 
 -- !query
+SELECT * FROM t3 LEFT JOIN LATERAL EXPLODE(c2)
+-- !query schema
+struct<c1:int,c2:array<int>,col:int>
+-- !query output
+0	[0,1]	0
+0	[0,1]	1
+1	[2]	2
+2	[]	NULL
+NULL	[4]	4
+
+
+-- !query
+SELECT * FROM t3 LEFT JOIN LATERAL (SELECT 1 AS c, col FROM EXPLODE(c2))
+-- !query schema
+struct<c1:int,c2:array<int>,c:int,col:int>
+-- !query output
+0	[0,1]	1	0
+0	[0,1]	1	1
+1	[2]	1	2
+2	[]	NULL	NULL
+NULL	[4]	1	4
+
+
+-- !query
 SELECT * FROM t1, LATERAL (SELECT * FROM EXPLODE(ARRAY(c1, c2)))
 -- !query schema
 struct<c1:int,c2:int,col:int>
