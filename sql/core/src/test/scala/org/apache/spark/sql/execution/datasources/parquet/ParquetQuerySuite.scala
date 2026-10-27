@@ -1252,6 +1252,25 @@ abstract class ParquetQuerySuite extends ParquetTest
     }
   }
 
+  test("row group skipping doesn't overflow when reading decimals into larger precision") {
+    // The file types are stored as INT32, INT64 and FIXED_LEN_BYTE_ARRAY. The unscaled value of
+    // the bound does not fit in the stored type.
+    Seq(
+      ("DECIMAL(9, 2)", "DECIMAL(12, 2)", "30000000"),
+      ("DECIMAL(18, 2)", "DECIMAL(20, 2)", "100000000000000000"),
+      ("DECIMAL(20, 2)", "DECIMAL(38, 2)", "1000000000000000000000000000000")
+    ).foreach { case (fileType, readType, bound) =>
+      withTempPath { path =>
+        sql(s"SELECT CAST(1.5 AS $fileType) a").write.parquet(path.toString)
+        withAllParquetReaders {
+          val df = spark.read.schema(s"a $readType").parquet(path.toString)
+          checkAnswer(df.where(s"a < $bound"), Row(new BigDecimal("1.50")))
+          checkAnswer(df.where(s"a > -$bound"), Row(new BigDecimal("1.50")))
+        }
+      }
+    }
+  }
+
   test("SPARK-36825, SPARK-36852: create table with ANSI intervals") {
     withTable("tbl") {
       sql("create table tbl (c1 interval day, c2 interval year to month) using parquet")

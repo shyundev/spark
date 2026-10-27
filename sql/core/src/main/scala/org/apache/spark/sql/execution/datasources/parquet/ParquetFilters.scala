@@ -992,22 +992,24 @@ class ParquetFilters(
       case FrameworkFilterOps(ops) =>
         ops.acceptsValue(value) && readType.exists(ops.acceptsReadType)
       case ParquetSchemaType(decimalType: DecimalLogicalTypeAnnotation, INT32, _) =>
-        isDecimalMatched(value, decimalType)
+        isDecimalMatched(value, decimalType, 32)
       case ParquetSchemaType(decimalType: DecimalLogicalTypeAnnotation, INT64, _) =>
-        isDecimalMatched(value, decimalType)
-      case
-        ParquetSchemaType(decimalType: DecimalLogicalTypeAnnotation, FIXED_LEN_BYTE_ARRAY, _) =>
-        isDecimalMatched(value, decimalType)
+        isDecimalMatched(value, decimalType, 64)
+      case ParquetSchemaType(
+          decimalType: DecimalLogicalTypeAnnotation, FIXED_LEN_BYTE_ARRAY, length) =>
+        isDecimalMatched(value, decimalType, length * 8)
       case _ => false
     })
   }
 
   // Decimal type must make sure that filter value's scale matched the file.
   // If doesn't matched, which would cause data corruption.
+  // The unscaled value must also fit in the physical type, which can be narrower than the read
+  // type, e.g. DECIMAL(9, 2) read as DECIMAL(12, 2). Otherwise the converted value overflows.
   private def isDecimalMatched(value: Any,
-      decimalLogicalType: DecimalLogicalTypeAnnotation): Boolean = value match {
+      decimalLogicalType: DecimalLogicalTypeAnnotation, numBits: Int): Boolean = value match {
     case decimal: JBigDecimal =>
-      decimal.scale == decimalLogicalType.getScale
+      decimal.scale == decimalLogicalType.getScale && decimal.unscaledValue.bitLength < numBits
     case _ => false
   }
 
