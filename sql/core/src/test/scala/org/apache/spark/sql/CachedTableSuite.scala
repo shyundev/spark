@@ -2884,6 +2884,34 @@ class CachedTableSuite extends SharedSparkSession
     }
   }
 
+  test("SPARK-XXXXX: REFRESH TABLE picks up new files when the cache holds an older relation") {
+    val t = "spark_catalog.default.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT) USING parquet")
+      sql(s"INSERT INTO $t VALUES (1)")
+      sql(s"CACHE TABLE $t")
+      val location = spark.sessionState.catalog
+        .getTableMetadata(TableIdentifier("t", Some("default"))).location
+      def addFileOutsideSpark(id: Int): Unit = withTempDir { dir =>
+        Seq(id).toDF("id").coalesce(1).write.mode("overwrite").parquet(dir.getCanonicalPath)
+        val file = dir.listFiles().find(_.getName.endsWith(".parquet")).get
+        Files.move(file.toPath, Paths.get(location).resolve(s"external-$id.parquet"))
+      }
+
+      // The insert invalidates the relation cache, so REFRESH TABLE resolves a new relation
+      // while the cached plan still holds the one resolved before.
+      sql(s"INSERT INTO $t VALUES (2)")
+      addFileOutsideSpark(3)
+      sql(s"REFRESH TABLE $t")
+      checkAnswer(spark.table(t), Seq(1, 2, 3).map(Row(_)))
+
+      // Another session resolves its own relation as well.
+      addFileOutsideSpark(4)
+      spark.newSession().sql(s"REFRESH TABLE $t")
+      checkAnswer(spark.table(t), Seq(1, 2, 3, 4).map(Row(_)))
+    }
+  }
+
   private def cacheManager = spark.sharedState.cacheManager
 
   private def pinTable(
