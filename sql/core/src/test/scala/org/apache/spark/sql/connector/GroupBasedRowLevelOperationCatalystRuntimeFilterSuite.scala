@@ -79,6 +79,20 @@ class GroupBasedRowLevelOperationCatalystRuntimeFilterSuite
     checkDeleteMetrics(numDeletedRows = 1, numCopiedRows = 1)
   }
 
+  test("delete runtime group filtering keeps the group with a NULL key") {
+    // the rows matching the condition are in software and in the group whose dep is NULL
+    createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",
+      """{ "pk": 1, "id": 1, "salary": 300, "dep": "hr" }
+        |{ "pk": 2, "id": 2, "salary": 150, "dep": null }
+        |{ "pk": 3, "id": 3, "salary": 120, "dep": "software" }
+        |""".stripMargin)
+
+    sql(s"DELETE FROM $tableNameAsString WHERE salary < 200")
+
+    checkAnswer(sql(s"SELECT * FROM $tableNameAsString"), Row(1, 1, 300, "hr") :: Nil)
+    checkReplacedPartitions(Seq(null, "software"))
+  }
+
   private def checkDeleteMetrics(numDeletedRows: Long, numCopiedRows: Long): Unit = {
     val t = catalog.loadTable(ident).asInstanceOf[InMemoryTable]
     val summary = t.commits.last.writeSummary.get.asInstanceOf[DeleteSummary]

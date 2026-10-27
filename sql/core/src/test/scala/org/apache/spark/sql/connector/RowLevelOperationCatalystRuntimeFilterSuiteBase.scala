@@ -80,6 +80,38 @@ abstract class RowLevelOperationCatalystRuntimeFilterSuiteBase
     }
   }
 
+  test("update runtime group filtering keeps the group with a NULL key") {
+    // the rows matching the condition are in software and in the group whose dep is NULL
+    createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",
+      """{ "pk": 1, "id": 1, "salary": 300, "dep": "hr" }
+        |{ "pk": 2, "id": 2, "salary": 150, "dep": null }
+        |{ "pk": 3, "id": 3, "salary": 120, "dep": "software" }
+        |""".stripMargin)
+
+    sql(s"UPDATE $tableNameAsString SET salary = -1 WHERE salary < 200")
+
+    checkAnswer(
+      sql(s"SELECT * FROM $tableNameAsString"),
+      Row(1, 1, 300, "hr") :: Row(2, 2, -1, null) :: Row(3, 3, -1, "software") :: Nil)
+  }
+
+  test("update runtime group filtering keeps the groups with a NULL key field") {
+    val schema = "pk INT NOT NULL, salary INT, dep STRING, region STRING"
+    createTable(schema, Array[Transform](identity(reference(Seq("dep"))),
+      identity(reference(Seq("region")))))
+    append(schema,
+      """{ "pk": 1, "salary": 300, "dep": "hr", "region": "west" }
+        |{ "pk": 2, "salary": 150, "dep": null, "region": "west" }
+        |{ "pk": 3, "salary": 120, "dep": "software", "region": null }
+        |""".stripMargin)
+
+    sql(s"UPDATE $tableNameAsString SET salary = -1 WHERE salary < 200")
+
+    checkAnswer(
+      sql(s"SELECT * FROM $tableNameAsString"),
+      Row(1, 300, "hr", "west") :: Row(2, -1, null, "west") :: Row(3, -1, "software", null) :: Nil)
+  }
+
   test("merge runtime group filtering with SupportsRuntimeCatalystFiltering") {
     withTempView("source") {
       createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",

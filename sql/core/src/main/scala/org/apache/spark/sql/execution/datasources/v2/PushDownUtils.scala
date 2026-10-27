@@ -22,7 +22,8 @@ import scala.collection.mutable
 import org.apache.spark.SparkException
 import org.apache.spark.internal.{Logging, LogKeys}
 import org.apache.spark.sql.AnalysisException
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, DynamicPruning, DynamicPruningExpression, Expression, ExpressionSet, GetStructField, Literal, NamedExpression, PythonUDF, SchemaPruning, SubqueryExpression, V2ExpressionUtils}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, DynamicPruning, DynamicPruningExpression, Expression, ExpressionSet, GetStructField, InSet, IsNull, Literal, NamedExpression, Or, PythonUDF, SchemaPruning, SubqueryExpression, V2ExpressionUtils}
 import org.apache.spark.sql.catalyst.plans.logical.SampleMethod
 import org.apache.spark.sql.catalyst.plans.physical.KeyedPartitioning
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
@@ -504,6 +505,22 @@ object PushDownUtils extends Logging {
     rf match {
       case DynamicPruningExpression(in: InSubqueryExec) if in.isResultUnavailable =>
         None
+      // A row-level operation's group filter must keep a group whose key is or holds NULL when
+      // that group holds a matching row. A V2 scan gets the NULL in its IN predicate, but a
+      // Catalyst IN never matches such a key, so match the keys that hold NULL explicitly.
+      case DynamicPruningExpression(in: InSubqueryExec) if in.values().isDefined =>
+        val nullKeys = in.values().get.filter {
+          case null => true
+          case row: InternalRow => row.anyNull
+          case _ => false
+        }
+        if (nullKeys.isEmpty) {
+          Some(in)
+        } else if (nullKeys.contains(null)) {
+          Some(Or(in, IsNull(in.child)))
+        } else {
+          Some(Or(in, InSet(in.child, nullKeys.toSet)))
+        }
       case DynamicPruningExpression(e) => Some(e)
       case _: DynamicPruning => None
       case f => Some(f.transform { case s: ExecScalarSubquery => s.toLiteral })
