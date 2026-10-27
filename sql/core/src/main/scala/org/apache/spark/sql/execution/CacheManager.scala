@@ -287,6 +287,15 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
     case other => other
   }
 
+  /**
+   * Returns whether `f` holds for any node of the given plan or of its (nested) subqueries.
+   * A cache entry also reads the relations of its subqueries, so a change to any of them
+   * affects it.
+   */
+  private def existsWithSubqueries(plan: LogicalPlan)(f: LogicalPlan => Boolean): Boolean = {
+    plan.exists(p => f(p) || p.subqueries.exists(existsWithSubqueries(_)(f)))
+  }
+
   private def isTimeTravelRelation(relation: BaseRelation): Boolean = relation match {
     case hadoopFsRelation: HadoopFsRelation => hadoopFsRelation.location.isTimeTravel
     case _ => false
@@ -314,7 +323,7 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
       blocking: Boolean): Unit = {
     val shouldRemove: LogicalPlan => Boolean =
       if (cascade) {
-        _.exists(isMatchedPlan)
+        existsWithSubqueries(_)(isMatchedPlan)
       } else {
         isMatchedPlan
       }
@@ -343,7 +352,7 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
         //    will keep it as it is. It means the physical plan has been re-compiled already in the
         //    other thread.
         val cacheAlreadyLoaded = cd.cachedRepresentation.cacheBuilder.isCachedColumnBuffersLoaded
-        cd.plan.exists(isMatchedPlan) && !cacheAlreadyLoaded
+        existsWithSubqueries(cd.plan)(isMatchedPlan) && !cacheAlreadyLoaded
       })
     }
   }
@@ -365,7 +374,7 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
    */
   def recacheByPlan(spark: SparkSession, plan: LogicalPlan): Unit = {
     val normalized = QueryExecution.normalize(spark, plan)
-    recacheByCondition(spark, _.plan.exists(_.sameResult(normalized)))
+    recacheByCondition(spark, cd => existsWithSubqueries(cd.plan)(_.sameResult(normalized)))
   }
 
   /**
@@ -377,7 +386,7 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
       includeTimeTravel: Boolean = true): Unit = {
     val resolver = spark.sessionState.conf.resolver
     def shouldInvalidate(entry: CachedData): Boolean = {
-      entry.plan.exists(isMatchedTableOrView(_, name, resolver, includeTimeTravel))
+      existsWithSubqueries(entry.plan)(isMatchedTableOrView(_, name, resolver, includeTimeTravel))
     }
     recacheByCondition(spark, shouldInvalidate)
   }
@@ -634,9 +643,9 @@ class CacheManager extends Logging with AdaptiveSparkPlanHelper {
       fs: FileSystem,
       includeTimeTravel: Boolean): Unit = {
     val qualifiedPath = fs.makeQualified(resourcePath)
-    recacheByCondition(
-      spark,
-      _.plan.exists(lookupAndRefresh(_, fs, qualifiedPath, includeTimeTravel)))
+    recacheByCondition(spark, cd => existsWithSubqueries(cd.plan) {
+      lookupAndRefresh(_, fs, qualifiedPath, includeTimeTravel)
+    })
   }
 
   /**

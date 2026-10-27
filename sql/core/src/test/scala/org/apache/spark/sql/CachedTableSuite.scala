@@ -2884,6 +2884,33 @@ class CachedTableSuite extends SharedSparkSession
     }
   }
 
+  test("SPARK-XXXXX: recache cached queries that read the changed table in a subquery") {
+    val (t1, t2) = ("spark_catalog.default.t1", "spark_catalog.default.t2")
+    withTable(t1, t2) {
+      sql(s"CREATE TABLE $t1 (id INT) USING parquet")
+      sql(s"INSERT INTO $t1 VALUES (1), (2), (3)")
+      sql(s"CREATE TABLE $t2 (id INT) USING parquet")
+      sql(s"INSERT INTO $t2 VALUES (1)")
+      val inQuery = s"SELECT id FROM $t1 WHERE id IN (SELECT id FROM $t2)"
+      val existsQuery =
+        s"SELECT id FROM $t1 a WHERE EXISTS (SELECT 1 FROM $t2 b WHERE b.id = a.id)"
+      val scalarQuery = s"SELECT id, (SELECT max(id) FROM $t2) AS m FROM $t1"
+      Seq(inQuery, existsQuery, scalarQuery).foreach(sql(_).cache().count())
+
+      sql(s"TRUNCATE TABLE $t2")
+      Seq(inQuery, existsQuery, scalarQuery).foreach(q => assertCached(sql(q)))
+      checkAnswer(sql(inQuery), Nil)
+      checkAnswer(sql(existsQuery), Nil)
+      checkAnswer(sql(scalarQuery), Row(1, null) :: Row(2, null) :: Row(3, null) :: Nil)
+
+      sql(s"INSERT INTO $t2 VALUES (2)")
+      Seq(inQuery, existsQuery, scalarQuery).foreach(q => assertCached(sql(q)))
+      checkAnswer(sql(inQuery), Row(2))
+      checkAnswer(sql(existsQuery), Row(2))
+      checkAnswer(sql(scalarQuery), Row(1, 2) :: Row(2, 2) :: Row(3, 2) :: Nil)
+    }
+  }
+
   private def cacheManager = spark.sharedState.cacheManager
 
   private def pinTable(
