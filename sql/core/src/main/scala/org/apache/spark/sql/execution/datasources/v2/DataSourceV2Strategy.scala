@@ -42,7 +42,7 @@ import org.apache.spark.sql.connector.expressions.{FieldReference, LiteralValue}
 import org.apache.spark.sql.connector.expressions.filter.{AlwaysFalse, And => V2And, Not => V2Not, Or => V2Or, Predicate}
 import org.apache.spark.sql.connector.read.LocalScan
 import org.apache.spark.sql.connector.read.streaming.{ContinuousStream, MicroBatchStream, SupportsRealTimeMode}
-import org.apache.spark.sql.connector.write.{V1Write, Write}
+import org.apache.spark.sql.connector.write.{RowLevelOperationTable, SupportsDelta, V1Write, Write}
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.{FilterExec, InSubqueryExec, LeafExecNode, LocalTableScanExec, ProjectExec, RowDataSourceScanExec, ScalarSubquery => ExecScalarSubquery, SparkPlan, SparkStrategy => Strategy}
 import org.apache.spark.sql.execution.command.{CommandUtils, MetricViewHelper}
@@ -169,6 +169,13 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         case _ => false
       }
 
+      // A group-based row-level operation replaces the groups its scan reads, so the filters
+      // that pick which of those rows to change or copy over must not prune the scan.
+      val canPruneByFilters = relation.relation.table match {
+        case RowLevelOperationTable(_, operation) => operation.isInstanceOf[SupportsDelta]
+        case _ => true
+      }
+
       // Extract scalar subquery filters on runtime-filterable columns for runtime pushdown.
       // These filters stay in postScanFilters for correctness (FilterExec above scan),
       // but are also routed into runtimeFilters so BatchScanExec can use them for
@@ -179,7 +186,7 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       // pruning while the FilterExec above the scan re-evaluates them, so the two evaluations
       // may disagree and rows the source pruned away could not be recovered. This is the
       // runtime counterpart of the pushFilters guard in PushDownUtils (SPARK-58207).
-      val scalarSubqueryFilters = if (relation.runtimeFilterAttrs.nonEmpty) {
+      val scalarSubqueryFilters = if (relation.runtimeFilterAttrs.nonEmpty && canPruneByFilters) {
         postScanFilters.filter { f =>
           f.deterministic &&
             f.containsPattern(SCALAR_SUBQUERY) &&

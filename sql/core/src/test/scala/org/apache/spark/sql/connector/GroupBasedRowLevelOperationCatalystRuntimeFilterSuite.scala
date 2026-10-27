@@ -26,6 +26,8 @@ import org.apache.spark.sql.connector.write.DeleteSummary
 class GroupBasedRowLevelOperationCatalystRuntimeFilterSuite
   extends RowLevelOperationCatalystRuntimeFilterSuiteBase {
 
+  import testImplicits._
+
   test("delete runtime group filtering with SupportsRuntimeCatalystFiltering") {
     // the table is partitioned by dep, so hr and software are the two groups
     createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",
@@ -77,6 +79,40 @@ class GroupBasedRowLevelOperationCatalystRuntimeFilterSuite
 
     checkReplacedPartitions(Seq("hr"))
     checkDeleteMetrics(numDeletedRows = 1, numCopiedRows = 1)
+  }
+
+  test("delete by a scalar subquery on the partition column") {
+    withTempView("dept") {
+      createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",
+        """{ "pk": 1, "id": 1, "salary": 300, "dep": "hr" }
+          |{ "pk": 2, "id": 2, "salary": 150, "dep": "software" }
+          |{ "pk": 3, "id": 3, "salary": 120, "dep": "hr" }
+          |""".stripMargin)
+      Seq("hr").toDF("dep").createOrReplaceTempView("dept")
+
+      sql(s"DELETE FROM $tableNameAsString WHERE dep = (SELECT max(dep) FROM dept)")
+
+      checkAnswer(sql(s"SELECT * FROM $tableNameAsString"), Row(2, 2, 150, "software") :: Nil)
+      checkReplacedPartitions(Seq("hr"))
+    }
+  }
+
+  test("update by a scalar subquery on the partition column") {
+    withTempView("dept") {
+      createAndInitTable("pk INT NOT NULL, id INT, salary INT, dep STRING",
+        """{ "pk": 1, "id": 1, "salary": 300, "dep": "hr" }
+          |{ "pk": 2, "id": 2, "salary": 150, "dep": "software" }
+          |{ "pk": 3, "id": 3, "salary": 120, "dep": "hr" }
+          |""".stripMargin)
+      Seq("hr").toDF("dep").createOrReplaceTempView("dept")
+
+      sql(s"UPDATE $tableNameAsString SET salary = -1 WHERE dep = (SELECT max(dep) FROM dept)")
+
+      checkAnswer(
+        sql(s"SELECT * FROM $tableNameAsString"),
+        Row(1, 1, -1, "hr") :: Row(2, 2, 150, "software") :: Row(3, 3, -1, "hr") :: Nil)
+      checkReplacedPartitions(Seq("hr"))
+    }
   }
 
   private def checkDeleteMetrics(numDeletedRows: Long, numCopiedRows: Long): Unit = {
